@@ -117,3 +117,5 @@ export const CUSTOM_RULE_CONFIG_FIELDS: Record<
     },
   ],
 }
+
+export const INTERCEPTOR_PRESETS_QUERY_KEY = ['interceptor-presets'] as const

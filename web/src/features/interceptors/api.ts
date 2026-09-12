@@ -1,7 +1,11 @@
 import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-import type { Interceptor, RuleTypeDescription } from './types'
+import type {
+  Interceptor,
+  InterceptorPreset,
+  RuleTypeDescription,
+} from './types'
 
 export async function getInterceptors(): Promise<Interceptor[]> {
   const res = await api.get<{ success: boolean; data: Interceptor[] }>(
@@ -47,6 +51,13 @@ export async function deleteInterceptor(id: number): Promise<void> {
 export async function getRuleTypes(): Promise<RuleTypeDescription> {
   const res = await api.get<{ success: boolean; data: RuleTypeDescription }>(
     '/api/interceptor/rule_types'
+  )
+  return requireServerSuccess(res.data).data
+}
+
+export async function getInterceptorPresets(): Promise<InterceptorPreset[]> {
+  const res = await api.get<{ success: boolean; data: InterceptorPreset[] }>(
+    '/api/interceptor/presets'
   )
   return requireServerSuccess(res.data).data
 }

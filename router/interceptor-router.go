@@ -12,6 +12,7 @@ func registerInterceptorRoutes(apiRouter *gin.RouterGroup) {
 	{
 		interceptorRoute.GET("/", controller.GetAllInterceptors)
 		interceptorRoute.GET("/rule_types", controller.GetInterceptorRuleTypes)
+		interceptorRoute.GET("/presets", controller.GetInterceptorPresets)
 		interceptorRoute.GET("/:id", controller.GetInterceptor)
 		interceptorRoute.POST("/", controller.CreateInterceptor)
 		interceptorRoute.PUT("/", controller.UpdateInterceptor)

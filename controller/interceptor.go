@@ -108,6 +108,10 @@ func GetAllInterceptorLogs(c *gin.Context) {
 	})
 }
 
+func GetInterceptorPresets(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": interceptor.Presets()})
+}
+
 func GetInterceptorLogStats(c *gin.Context) {
 	start, _ := strconv.ParseInt(c.Query("start"), 10, 64)
 	end, _ := strconv.ParseInt(c.Query("end"), 10, 64)

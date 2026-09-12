@@ -23,3 +23,9 @@ export type InterceptorFormData = Omit<
 export interface RuleTypeDescription {
   [key: string]: string
 }
+
+export interface InterceptorPreset {
+  name: string
+  description: string
+  rules: InterceptorRule[]
+}

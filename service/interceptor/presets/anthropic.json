@@ -1,0 +1,187 @@
+[
+  {
+    "type": "reject_large_body",
+    "config": {
+      "max_bytes": 31457280
+    }
+  },
+  {
+    "type": "fix_content_array"
+  },
+  {
+    "type": "fix_tools_array"
+  },
+  {
+    "type": "fix_system_field"
+  },
+  {
+    "type": "hoist_system"
+  },
+  {
+    "type": "fix_empty_system"
+  },
+  {
+    "type": "fix_message_roles"
+  },
+  {
+    "type": "strip_thinking"
+  },
+  {
+    "type": "strip_reasoning"
+  },
+  {
+    "type": "strip_annotations"
+  },
+  {
+    "type": "strip_empty_text"
+  },
+  {
+    "type": "strip_url_source"
+  },
+  {
+    "type": "trim_whitespace"
+  },
+  {
+    "type": "strip_assist_prefill"
+  },
+  {
+    "type": "fix_thinking_type"
+  },
+  {
+    "type": "fix_thinking_budget"
+  },
+  {
+    "type": "strip_temperature"
+  },
+  {
+    "type": "strip_top_pk"
+  },
+  {
+    "type": "strip_params_for_model",
+    "config": {
+      "models": [
+        "claude-opus-4-8",
+        "claude-opus-5",
+        "claude-opus-4-7"
+      ],
+      "params": [
+        "temperature",
+        "top_p",
+        "top_k"
+      ]
+    }
+  },
+  {
+    "type": "fix_temp_topp_conflict"
+  },
+  {
+    "type": "clamp_top_p"
+  },
+  {
+    "type": "clamp_top_k"
+  },
+  {
+    "type": "cap_max_tokens"
+  },
+  {
+    "type": "fix_effort"
+  },
+  {
+    "type": "filter_beta",
+    "config": {
+      "denied": [
+        "computer-use-",
+        "advisor-tool-",
+        "totally-bogus-beta-"
+      ]
+    }
+  },
+  {
+    "type": "filter_tool_types",
+    "config": {
+      "rename_types": {
+        "computer_20250124": "computer_toolset_20260801"
+      },
+      "allowed_types": [
+        "bash_20250124",
+        "browser_toolset_20260801",
+        "computer_toolset_20260801",
+        "custom",
+        "memory_20250818",
+        "text_editor_20250124",
+        "text_editor_20250429",
+        "text_editor_20250728",
+        "tool_search_tool_bm25",
+        "tool_search_tool_bm25_20251119",
+        "tool_search_tool_regex",
+        "tool_search_tool_regex_20251119",
+        "web_search_20250305"
+      ],
+      "strip_fields": {
+        "computer_toolset_20260801": [
+          "name",
+          "display_width_px",
+          "display_height_px",
+          "display_number"
+        ],
+        "browser_toolset_20260801": [
+          "name",
+          "display_width_px",
+          "display_height_px",
+          "display_number"
+        ]
+      }
+    }
+  },
+  {
+    "type": "fix_tool_name"
+  },
+  {
+    "type": "fix_tool_choice",
+    "config": {
+      "denied_types": [
+        "tool",
+        "any"
+      ]
+    }
+  },
+  {
+    "type": "fix_defer_loading"
+  },
+  {
+    "type": "fix_tool_use_id"
+  },
+  {
+    "type": "fix_orphan_tool_result"
+  },
+  {
+    "type": "fix_dangling_tool_use"
+  },
+  {
+    "type": "fix_schema_required"
+  },
+  {
+    "type": "fix_schema_citations"
+  },
+  {
+    "type": "fix_schema_properties"
+  },
+  {
+    "type": "fix_schema_oneof"
+  },
+  {
+    "type": "fix_additional_props"
+  },
+  {
+    "type": "custom_delete_key_all",
+    "config": {
+      "key": "extra_content"
+    }
+  },
+  {
+    "type": "reject_long_prompt"
+  },
+  {
+    "type": "reject_empty_messages"
+  }
+]

@@ -1,6 +1,6 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -28,15 +28,17 @@ import { handleServerError } from '@/lib/handle-server-error'
 
 import {
   createInterceptor,
+  getInterceptorPresets,
   getRuleTypes,
   updateInterceptor,
 } from '../api'
 import {
   CUSTOM_RULE_CONFIG_FIELDS,
+  INTERCEPTOR_PRESETS_QUERY_KEY,
   INTERCEPTOR_QUERY_KEY,
   RULE_TYPES_QUERY_KEY,
 } from '../constants'
-import type { Interceptor, InterceptorRule } from '../types'
+import type { Interceptor, InterceptorPreset, InterceptorRule } from '../types'
 
 interface InterceptorEditDialogProps {
   open: boolean
@@ -92,7 +94,9 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
       setPriority(props.interceptor.priority)
       try {
         setRules(
-          toEditableRules(JSON.parse(props.interceptor.rules) as InterceptorRule[])
+          toEditableRules(
+            JSON.parse(props.interceptor.rules) as InterceptorRule[]
+          )
         )
       } catch {
         setRules([])
@@ -126,7 +130,9 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
     },
     onSuccess: () => {
       toast.success(
-        props.interceptor ? t('Updated successfully') : t('Created successfully')
+        props.interceptor
+          ? t('Updated successfully')
+          : t('Created successfully')
       )
       queryClient.invalidateQueries({ queryKey: INTERCEPTOR_QUERY_KEY })
       props.onOpenChange(false)
@@ -143,10 +149,7 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
       toast.info(t('All selected rules are already added'))
       return
     }
-    setRules([
-      ...rules,
-      ...toAdd.map((type) => ({ type, _id: newRuleId() })),
-    ])
+    setRules([...rules, ...toAdd.map((type) => ({ type, _id: newRuleId() }))])
     if (toAdd.length < types.length) {
       toast.info(
         t('Added {{count}} new rules (duplicates skipped)', {
@@ -156,6 +159,19 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
     } else {
       toast.success(t('Added {{count}} rules', { count: toAdd.length }))
     }
+  }
+
+  const { data: presetData } = useQuery({
+    queryKey: INTERCEPTOR_PRESETS_QUERY_KEY,
+    queryFn: getInterceptorPresets,
+    enabled: props.open,
+  })
+  const presets = presetData ?? []
+
+  function applyPreset(preset: InterceptorPreset) {
+    // 整套替换而不是追加：预设的规则顺序本身就是它生效的前提。
+    setRules(toEditableRules(preset.rules))
+    toast.success(t('Preset loaded'))
   }
 
   function openPicker() {
@@ -205,7 +221,7 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className='max-h-[85vh] max-w-2xl overflow-y-auto'>
         <DialogHeader>
           <DialogTitle>
             {props.interceptor
@@ -214,34 +230,32 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">{t('Name')}</label>
+        <div className='space-y-4'>
+          <div className='grid grid-cols-2 gap-4'>
+            <div className='space-y-1.5'>
+              <label className='text-sm font-medium'>{t('Name')}</label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('Interceptor name')}
               />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">
-                {t('Channel ID')}
-              </label>
+            <div className='space-y-1.5'>
+              <label className='text-sm font-medium'>{t('Channel ID')}</label>
               <Input
-                type="number"
+                type='number'
                 value={channelId}
                 onChange={(e) => setChannelId(Number(e.target.value))}
-                placeholder="0 = global"
+                placeholder='0 = global'
               />
-              <p className="text-xs text-muted-foreground">
+              <p className='text-muted-foreground text-xs'>
                 0 = {t('Apply to all channels')}
               </p>
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">{t('Description')}</label>
+          <div className='space-y-1.5'>
+            <label className='text-sm font-medium'>{t('Description')}</label>
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -249,58 +263,55 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
             />
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
+          <div className='flex items-center gap-4'>
+            <div className='flex items-center gap-2'>
               <Switch checked={enabled} onCheckedChange={setEnabled} />
-              <label className="text-sm">{t('Enabled')}</label>
+              <label className='text-sm'>{t('Enabled')}</label>
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-sm">{t('Priority')}</label>
+            <div className='flex items-center gap-2'>
+              <label className='text-sm'>{t('Priority')}</label>
               <Input
-                type="number"
+                type='number'
                 value={priority}
                 onChange={(e) => setPriority(Number(e.target.value))}
-                className="w-20"
+                className='w-20'
               />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">
+          <div className='space-y-2'>
+            <div className='flex items-center justify-between'>
+              <label className='text-sm font-medium'>
                 {t('Rules')} ({rules.length})
               </label>
             </div>
 
             {rules.map((rule, index) => (
-              <div
-                key={rule._id}
-                className="rounded-md border p-3 space-y-2"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium">
+              <div key={rule._id} className='space-y-2 rounded-md border p-3'>
+                <div className='flex items-center justify-between'>
+                  <div className='flex flex-col gap-0.5'>
+                    <span className='text-sm font-medium'>
                       {ruleTypes[rule.type] ?? rule.type}
                     </span>
-                    <span className="font-mono text-xs text-muted-foreground">
+                    <span className='text-muted-foreground font-mono text-xs'>
                       {rule.type}
                     </span>
                   </div>
                   <Button
-                    variant="ghost"
-                    size="sm"
+                    variant='ghost'
+                    size='sm'
                     onClick={() => removeRule(index)}
-                    className="text-destructive h-7 px-2"
+                    className='text-destructive h-7 px-2'
                   >
                     {t('Remove')}
                   </Button>
                 </div>
                 {CUSTOM_RULE_CONFIG_FIELDS[rule.type]?.map((field) => (
-                  <div key={field.key} className="space-y-1">
-                    <label className="text-xs text-muted-foreground">
+                  <div key={field.key} className='space-y-1'>
+                    <label className='text-muted-foreground text-xs'>
                       {field.label}
                       {field.required && (
-                        <span className="text-destructive"> *</span>
+                        <span className='text-destructive'> *</span>
                       )}
                     </label>
                     <Input
@@ -313,29 +324,40 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
                         updateRuleConfig(index, field.key, e.target.value)
                       }
                       placeholder={field.placeholder}
-                      className="h-8 text-sm"
+                      className='h-8 text-sm'
                     />
                   </div>
                 ))}
               </div>
             ))}
 
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">
+            <div className='space-y-1.5'>
+              <label className='text-muted-foreground text-xs'>
                 {t('Add rule')}
               </label>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={openPicker}
-              >
+              <Button variant='outline' className='w-full' onClick={openPicker}>
                 {t('Add rules...')}
               </Button>
+              {presets.length > 0 && (
+                <div className='flex flex-wrap gap-2 pt-1'>
+                  {presets.map((preset) => (
+                    <Button
+                      key={preset.name}
+                      variant='ghost'
+                      size='sm'
+                      title={preset.description}
+                      onClick={() => applyPreset(preset)}
+                    >
+                      {t('Load preset')}: {preset.name} ({preset.rules.length})
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">
+          <div className='space-y-1.5'>
+            <label className='text-sm font-medium'>
               {t('Rules JSON')} ({t('advanced')})
             </label>
             <Textarea
@@ -352,16 +374,13 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
                 }
               }}
               rows={6}
-              className="font-mono text-xs"
+              className='font-mono text-xs'
             />
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => props.onOpenChange(false)}
-          >
+          <Button variant='outline' onClick={() => props.onOpenChange(false)}>
             {t('Cancel')}
           </Button>
           <Button
@@ -375,11 +394,11 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
 
       {/* Rule picker dialog */}
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
-        <DialogContent className="max-w-lg max-h-[70vh] overflow-hidden flex flex-col">
+        <DialogContent className='flex max-h-[70vh] max-w-lg flex-col overflow-hidden'>
           <DialogHeader>
             <DialogTitle>{t('Add Rules')}</DialogTitle>
           </DialogHeader>
-          <Command className="flex-1 overflow-hidden">
+          <Command className='flex-1 overflow-hidden'>
             <CommandInput placeholder={t('Search rules...')} />
             <CommandList>
               <CommandEmpty>{t('No rules found.')}</CommandEmpty>
@@ -412,11 +431,8 @@ export function InterceptorEditDialog(props: InterceptorEditDialogProps) {
               </CommandGroup>
             </CommandList>
           </Command>
-          <DialogFooter className="pt-2">
-            <Button
-              variant="outline"
-              onClick={() => setPickerOpen(false)}
-            >
+          <DialogFooter className='pt-2'>
+            <Button variant='outline' onClick={() => setPickerOpen(false)}>
               {t('Cancel')}
             </Button>
             <Button
@@ -445,17 +461,17 @@ function RulePickerItem(props: RulePickerItemProps) {
     <CommandItem
       value={type}
       onSelect={() => onToggle(type)}
-      className="flex items-center gap-2 cursor-pointer"
+      className='flex cursor-pointer items-center gap-2'
     >
       <Checkbox
         checked={checked}
         onCheckedChange={() => onToggle(type)}
         aria-label={description}
-        className="pointer-events-none"
+        className='pointer-events-none'
       />
-      <div className="flex flex-col gap-0.5 min-w-0">
-        <span className="text-sm">{description}</span>
-        <span className="font-mono text-xs text-muted-foreground">{type}</span>
+      <div className='flex min-w-0 flex-col gap-0.5'>
+        <span className='text-sm'>{description}</span>
+        <span className='text-muted-foreground font-mono text-xs'>{type}</span>
       </div>
     </CommandItem>
   )
