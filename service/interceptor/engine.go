@@ -647,6 +647,8 @@ func stripEmptyText(data map[string]any) bool {
 		if !ok {
 			continue
 		}
+		// 每条消息单独判断，否则前一条改过就会连带重写后面所有消息。
+		stripped := false
 		filtered := make([]any, 0, len(content))
 		for _, block := range content {
 			b, ok := block.(map[string]any)
@@ -654,15 +656,25 @@ func stripEmptyText(data map[string]any) bool {
 				t, _ := b["type"].(string)
 				text, _ := b["text"].(string)
 				if t == "text" && text == "" {
-					changed = true
+					stripped = true
 					continue
 				}
 			}
 			filtered = append(filtered, block)
 		}
-		if changed {
-			msg["content"] = filtered
+		if !stripped {
+			continue
 		}
+		// 上游对空 content 数组和空 text 块都会 400，两边都躲不过去，
+		// 所以清空时补一个占位文本块（生产实测：探活请求只带一个空 text 块）。
+		if len(filtered) == 0 {
+			filtered = append(filtered, map[string]any{
+				"type": "text",
+				"text": "(empty)",
+			})
+		}
+		msg["content"] = filtered
+		changed = true
 	}
 	return changed
 }

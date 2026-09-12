@@ -524,3 +524,48 @@ func TestRejectLargeBodyDefaultLimitIs30MB(t *testing.T) {
 	_, err = rejectLargeBody(rules, 33491491)
 	require.Error(t, err)
 }
+
+func TestStripEmptyTextNeverEmptiesContent(t *testing.T) {
+	// 生产实测：探活请求只带一个空 text 块，删干净会留下 "content":[]，
+	// 上游报 "user messages must have non-empty content"。
+	data := map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "text", "text": ""},
+		}},
+	}}
+	require.True(t, stripEmptyText(data))
+	content := data["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	require.Len(t, content, 1)
+	block := content[0].(map[string]any)
+	assert.Equal(t, "text", block["type"])
+	assert.NotEmpty(t, block["text"])
+}
+
+func TestStripEmptyTextKeepsOtherBlocks(t *testing.T) {
+	data := map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "text", "text": ""},
+			map[string]any{"type": "text", "text": "real"},
+		}},
+	}}
+	require.True(t, stripEmptyText(data))
+	content := data["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	require.Len(t, content, 1)
+	assert.Equal(t, "real", content[0].(map[string]any)["text"])
+}
+
+func TestStripEmptyTextLeavesUnaffectedMessagesAlone(t *testing.T) {
+	// 前一条消息被改过，不能连带重写后面没有空块的消息。
+	clean := map[string]any{"type": "text", "text": "keep"}
+	data := map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "text", "text": ""},
+			clean,
+		}},
+		map[string]any{"role": "assistant", "content": []any{clean}},
+	}}
+	require.True(t, stripEmptyText(data))
+	second := data["messages"].([]any)[1].(map[string]any)["content"].([]any)
+	require.Len(t, second, 1)
+	assert.Equal(t, "keep", second[0].(map[string]any)["text"])
+}
