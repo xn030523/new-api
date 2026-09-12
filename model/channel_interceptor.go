@@ -6,7 +6,7 @@ type ChannelInterceptor struct {
 	Id        int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	ChannelId int    `json:"channel_id" gorm:"index;not null;default:0"` // 0 = 全局
 	Name      string `json:"name" gorm:"not null"`
-	Rules     string `json:"rules" gorm:"type:text"`   // JSON 数组，规则列表
+	Rules     string `json:"rules" gorm:"type:text"` // JSON 数组，规则列表
 	Enabled   bool   `json:"enabled" gorm:"default:true"`
 	Priority  int    `json:"priority" gorm:"default:0"` // 优先级，数字大的先执行
 	CreatedAt int64  `json:"created_at" gorm:"autoCreateTime"`

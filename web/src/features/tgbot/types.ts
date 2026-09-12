@@ -35,6 +35,7 @@ export interface TgBotConfigResponse {
 
 export interface MonitorSettings {
   chart_enabled: boolean
+  chart_font_path: string
   exclude_users: string
   exclude_remarks: string
   active_users_only: boolean

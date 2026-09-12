@@ -8,39 +8,39 @@ type Rule struct {
 
 // 所有支持的规则类型
 const (
-	RuleFixContentArray     = "fix_content_array"      // content 字符串 → 数组
-	RuleFixToolsArray       = "fix_tools_array"         // tools 确保是数组
-	RuleFixSchemaRequired   = "fix_schema_required"     // input_schema.required 修复
-	RuleFixSchemaCitations  = "fix_schema_citations"    // citations 修复
-	RuleFixSchemaProperties = "fix_schema_properties"   // properties 不是 dict → 删
-	RuleStripThinking       = "strip_thinking"          // 去掉 thinking block
-	RuleStripReasoning      = "strip_reasoning"         // 去掉 reasoning 字段
-	RuleStripAnnotations    = "strip_annotations"       // 去掉 annotations 字段
-	RuleStripEmptyText      = "strip_empty_text"        // 去掉空 text block
-	RuleTrimWhitespace      = "trim_whitespace"         // 修剪尾部空白
-	RuleCapMaxTokens        = "cap_max_tokens"          // 限制 max_tokens
-	RuleFixSystemField      = "fix_system_field"        // system 字符串 → 数组
-	RuleStripTemperature    = "strip_temperature"       // thinking 时删 temperature
-	RuleStripTopPK          = "strip_top_pk"            // thinking 时删 top_p/top_k
-	RuleFixEffort           = "fix_effort"              // effort max → high
-	RuleFilterBeta          = "filter_beta"             // anthropic-beta 白名单
-	RuleFilterToolTypes     = "filter_tool_types"       // 过滤不支持的 tool type
-	RuleFixThinkingType     = "fix_thinking_type"       // enabled → adaptive
-	RuleFixToolUseId        = "fix_tool_use_id"         // tool_use.id 格式修复
-	RuleClampTopP           = "clamp_top_p"             // top_p 限制 0-1
-	RuleClampTopK           = "clamp_top_k"             // top_k 限制 0-100000000
-	RuleRejectLongPrompt    = "reject_long_prompt"      // 超长 prompt 拒绝
-	RuleFixSchemaOneOf      = "fix_schema_oneof"        // 删掉 oneOf/allOf/anyOf
-	RuleStripAssistPrefill  = "strip_assist_prefill"    // 删末尾 assistant 消息
-	RuleFixAdditionalProps  = "fix_additional_props"    // additionalProperties 补 false
+	RuleFixContentArray     = "fix_content_array"     // content 字符串 → 数组
+	RuleFixToolsArray       = "fix_tools_array"       // tools 确保是数组
+	RuleFixSchemaRequired   = "fix_schema_required"   // input_schema.required 修复
+	RuleFixSchemaCitations  = "fix_schema_citations"  // citations 修复
+	RuleFixSchemaProperties = "fix_schema_properties" // properties 不是 dict → 删
+	RuleStripThinking       = "strip_thinking"        // 去掉 thinking block
+	RuleStripReasoning      = "strip_reasoning"       // 去掉 reasoning 字段
+	RuleStripAnnotations    = "strip_annotations"     // 去掉 annotations 字段
+	RuleStripEmptyText      = "strip_empty_text"      // 去掉空 text block
+	RuleTrimWhitespace      = "trim_whitespace"       // 修剪尾部空白
+	RuleCapMaxTokens        = "cap_max_tokens"        // 限制 max_tokens
+	RuleFixSystemField      = "fix_system_field"      // system 字符串 → 数组
+	RuleStripTemperature    = "strip_temperature"     // thinking 时删 temperature
+	RuleStripTopPK          = "strip_top_pk"          // thinking 时删 top_p/top_k
+	RuleFixEffort           = "fix_effort"            // effort max → high
+	RuleFilterBeta          = "filter_beta"           // anthropic-beta 白名单
+	RuleFilterToolTypes     = "filter_tool_types"     // 过滤不支持的 tool type
+	RuleFixThinkingType     = "fix_thinking_type"     // enabled → adaptive
+	RuleFixToolUseId        = "fix_tool_use_id"       // tool_use.id 格式修复
+	RuleClampTopP           = "clamp_top_p"           // top_p 限制 0-1
+	RuleClampTopK           = "clamp_top_k"           // top_k 限制 0-100000000
+	RuleRejectLongPrompt    = "reject_long_prompt"    // 超长 prompt 拒绝
+	RuleFixSchemaOneOf      = "fix_schema_oneof"      // 删掉 oneOf/allOf/anyOf
+	RuleStripAssistPrefill  = "strip_assist_prefill"  // 删末尾 assistant 消息
+	RuleFixAdditionalProps  = "fix_additional_props"  // additionalProperties 补 false
 
 	// 自定义规则类型
-	RuleCustomDeletePath     = "custom_delete_path"      // 按路径删字段
-	RuleCustomSetValue       = "custom_set_value"        // 按路径设值
-	RuleCustomDeleteKeyAll   = "custom_delete_key_all"   // 递归删指定 key
-	RuleCustomEnsureArray    = "custom_ensure_array"     // 确保指定路径是数组
-	RuleCustomRenameKey      = "custom_rename_key"       // 重命名字段
-	RuleCustomRejectIf       = "custom_reject_if"        // 条件拒绝
+	RuleCustomDeletePath   = "custom_delete_path"    // 按路径删字段
+	RuleCustomSetValue     = "custom_set_value"      // 按路径设值
+	RuleCustomDeleteKeyAll = "custom_delete_key_all" // 递归删指定 key
+	RuleCustomEnsureArray  = "custom_ensure_array"   // 确保指定路径是数组
+	RuleCustomRenameKey    = "custom_rename_key"     // 重命名字段
+	RuleCustomRejectIf     = "custom_reject_if"      // 条件拒绝
 )
 
 // AllRuleDescriptions 规则描述（给前端显示用）

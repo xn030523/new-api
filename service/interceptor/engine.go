@@ -730,11 +730,11 @@ func filterToolTypes(data map[string]any) bool {
 	}
 	// Anthropic 支持的 tool type
 	supported := map[string]bool{
-		"custom":              true,
-		"computer_20250124":   true,
-		"bash_20250124":       true,
+		"custom":               true,
+		"computer_20250124":    true,
+		"bash_20250124":        true,
 		"text_editor_20250124": true,
-		"":                    true, // 没有 type 的也放行
+		"":                     true, // 没有 type 的也放行
 	}
 	filtered := make([]any, 0, len(tools))
 	changed := false

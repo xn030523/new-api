@@ -60,6 +60,7 @@ var FeatureDescriptions = map[string]string{
 // MonitorSettings holds settings for the monitor feature.
 type MonitorSettings struct {
 	ChartEnabled    bool   `json:"chart_enabled"`
+	ChartFontPath   string `json:"chart_font_path"`
 	ExcludeUsers    string `json:"exclude_users"`
 	ExcludeRemarks  string `json:"exclude_remarks"`
 	ActiveUsersOnly bool   `json:"active_users_only"`

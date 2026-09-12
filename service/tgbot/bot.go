@@ -207,7 +207,35 @@ func (s *BotService) pushMonitor() {
 		common.SysError("tgbot: fetch stats failed: " + err.Error())
 		return
 	}
-	s.sendToFeature(FeatureMonitor, FormatStats(stats, mSettings))
+	text := FormatStats(stats, mSettings)
+	if !mSettings.ChartEnabled {
+		s.sendToFeature(FeatureMonitor, text)
+		return
+	}
+	chart, err := RenderDashboard(stats, mSettings, "NEW-API MONITOR")
+	if err != nil {
+		common.SysError("tgbot: render dashboard failed, falling back to text: " + err.Error())
+		s.sendToFeature(FeatureMonitor, text)
+		return
+	}
+	s.sendPhotoToFeature(FeatureMonitor, chart, text)
+}
+
+// sendPhotoToFeature sends a rendered chart to all enabled targets of a feature.
+func (s *BotService) sendPhotoToFeature(featureName string, photo []byte, caption string) {
+	f, ok := s.features[featureName]
+	if !ok || !f.Enabled {
+		return
+	}
+	// Telegram rejects photo captions longer than 1024 characters.
+	if runes := []rune(caption); len(runes) > 1024 {
+		caption = string(runes[:1021]) + "..."
+	}
+	for _, target := range GetEnabledTargets(f) {
+		if err := s.client.SendPhoto(target.ChatID, photo, caption, target.ThreadID); err != nil {
+			common.SysError(fmt.Sprintf("tgbot: send photo to %s target %d/%d failed: %v", featureName, target.ChatID, target.ThreadID, err))
+		}
+	}
 }
 
 // dispatch routes one update to the appropriate handler.

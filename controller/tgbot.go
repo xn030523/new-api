@@ -52,9 +52,9 @@ func GetTgBotConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"config":   config,
-			"features": features,
-			"running":  botService != nil,
+			"config":       config,
+			"features":     features,
+			"running":      botService != nil,
 			"descriptions": tgbot.FeatureDescriptions,
 		},
 	})
