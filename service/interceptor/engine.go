@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -214,7 +215,7 @@ func applyRule(data map[string]any, rule Rule, modelName string) (bool, error) {
 		// 这个在 header 层处理，body 层不做
 		return false, nil
 	case RuleFilterToolTypes:
-		return filterToolTypes(data), nil
+		return filterToolTypes(data, rule.Config), nil
 	case RuleFixThinkingType:
 		return fixThinkingType(data), nil
 	case RuleFixToolUseId:
@@ -252,6 +253,12 @@ func applyRule(data map[string]any, rule Rule, modelName string) (bool, error) {
 		return fixDeferLoading(data), nil
 	case RuleFixOrphanToolResult:
 		return fixOrphanToolResult(data), nil
+	case RuleFixDanglingToolUse:
+		return fixDanglingToolUse(data), nil
+	case RuleFixToolName:
+		return fixToolName(data), nil
+	case RuleFixTempTopPConflict:
+		return fixTempTopPConflict(data), nil
 	case RuleRejectEmptyMessages:
 		return false, rejectEmptyMessages(data)
 	case RuleFixThinkingBudget:
@@ -748,12 +755,92 @@ func fixEffort(data map[string]any) bool {
 }
 
 // filterToolTypes: 过滤不支持的 tool type
-func filterToolTypes(data map[string]any) bool {
+// filterToolTypes 处理 tools 数组里上游不认的 type 值。
+// 上游会改动内置工具的 type 命名（例如 computer_20250124 改成
+// computer_toolset_20260801），命中 rename_types 的改名，命中 denied_types 的整项删掉，
+// 配了 allowed_types 则只放行清单内的 type。三份清单都来自规则参数，
+// 上游再改命名只需改配置；都没配时退回内置白名单。
+func filterToolTypes(data map[string]any, config map[string]any) bool {
 	tools, ok := getTools(data)
 	if !ok {
 		return false
 	}
-	// Anthropic 支持的 tool type
+	denied := getConfigStrings(config, "denied_types")
+	allowed := getConfigStrings(config, "allowed_types")
+	renames, _ := config["rename_types"].(map[string]any)
+	stripFields, _ := config["strip_fields"].(map[string]any)
+	if len(denied) == 0 && len(allowed) == 0 && len(renames) == 0 && len(stripFields) == 0 {
+		return filterToolTypesByAllowlist(data, tools)
+	}
+
+	changed := false
+	kept := make([]any, 0, len(tools))
+	for _, tool := range tools {
+		tm, ok := tool.(map[string]any)
+		if !ok {
+			kept = append(kept, tool)
+			continue
+		}
+		toolType, _ := tm["type"].(string)
+		if toolType == "" {
+			kept = append(kept, tool)
+			continue
+		}
+		if newType, ok := renames[toolType].(string); ok && newType != "" {
+			tm["type"] = newType
+			stripToolFields(tm, stripFields, newType)
+			kept = append(kept, tm)
+			changed = true
+			continue
+		}
+		if stripToolFields(tm, stripFields, toolType) {
+			changed = true
+		}
+		if slices.Contains(denied, toolType) {
+			changed = true
+			continue
+		}
+		// allowed_types 配了就以它为准，取代内置白名单。
+		if len(allowed) > 0 && !slices.Contains(allowed, toolType) {
+			changed = true
+			continue
+		}
+		kept = append(kept, tool)
+	}
+	if !changed {
+		return false
+	}
+	// tools 变成空数组同样会被上游拒绝，连带 tool_choice 一起删掉。
+	if len(kept) == 0 {
+		delete(data, "tools")
+		delete(data, "tool_choice")
+		return true
+	}
+	data["tools"] = kept
+	return true
+}
+
+// stripToolFields 删掉某个 tool type 不接受的字段。
+// toolset 类型的条目成员名是固定的，带上 name 会被上游拒绝。
+func stripToolFields(tool map[string]any, stripFields map[string]any, toolType string) bool {
+	if len(stripFields) == 0 {
+		return false
+	}
+	fields, ok := stripFields[toolType]
+	if !ok {
+		return false
+	}
+	changed := false
+	for _, f := range getConfigStrings(map[string]any{"f": fields}, "f") {
+		if _, exists := tool[f]; exists {
+			delete(tool, f)
+			changed = true
+		}
+	}
+	return changed
+}
+
+func filterToolTypesByAllowlist(data map[string]any, tools []any) bool {
 	supported := map[string]bool{
 		"custom":               true,
 		"computer_20250124":    true,

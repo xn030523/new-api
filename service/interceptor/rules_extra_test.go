@@ -2,6 +2,7 @@ package interceptor
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -206,18 +207,113 @@ func TestUpstreamModelNameFallsBackToRelayInfo(t *testing.T) {
 	assert.Equal(t, "origin-model", upstreamModelName(vertexBody, withOrigin))
 }
 
-func TestFixOrphanToolResultKeepsMessageItWouldEmpty(t *testing.T) {
-	// 生产实测回归：首条消息就是孤儿 tool_result 时，删空它会让 messages 变空，
-	// 进而被 reject_empty_messages 误拒。必须原样保留交给上游判断。
+func TestFixOrphanToolResultDowngradesSoleOrphanToText(t *testing.T) {
+	// 生产实测回归：首条消息就是孤儿 tool_result。删空它会让 messages 变空，
+	// 进而被 reject_empty_messages 误拒；原样保留上游又会 400。
+	// 降级成文本块两边都躲开，工具返回的内容也不丢。
 	data := map[string]any{"messages": []any{
 		map[string]any{"role": "user", "content": []any{
 			map[string]any{"type": "tool_result", "tool_use_id": "toolu_bdrk_01UK", "content": "sunny"},
 		}},
 	}}
-	assert.False(t, fixOrphanToolResult(data))
+	require.True(t, fixOrphanToolResult(data))
 	msgs := data["messages"].([]any)
 	require.Len(t, msgs, 1)
-	assert.Len(t, msgs[0].(map[string]any)["content"], 1)
+	content := msgs[0].(map[string]any)["content"].([]any)
+	require.Len(t, content, 1)
+	block := content[0].(map[string]any)
+	assert.Equal(t, "text", block["type"])
+	assert.Equal(t, "sunny", block["text"])
+}
+
+func TestOrphanToolResultTextFromBlockArray(t *testing.T) {
+	text := orphanToolResultText([]any{
+		map[string]any{"type": "tool_result", "content": []any{
+			map[string]any{"type": "text", "text": "line1"},
+			map[string]any{"type": "text", "text": "line2"},
+		}},
+	})
+	assert.Equal(t, "line1line2", text)
+}
+
+func TestOrphanToolResultTextFallsBackWhenEmpty(t *testing.T) {
+	// content 缺失或不是可读结构时不能产出空文本块，上游会拒绝空 text。
+	assert.Equal(t, "(tool result omitted)",
+		orphanToolResultText([]any{map[string]any{"type": "tool_result"}}))
+}
+
+func TestFilterToolTypesRenamesAndDenies(t *testing.T) {
+	data := map[string]any{"tools": []any{
+		map[string]any{"type": "computer_20250124", "name": "computer"},
+		map[string]any{"type": "totally_bogus", "name": "bogus"},
+		map[string]any{"type": "custom", "name": "mine"},
+	}}
+	config := map[string]any{
+		"denied_types": []any{"totally_bogus"},
+		"rename_types": map[string]any{"computer_20250124": "computer_toolset_20260801"},
+	}
+	require.True(t, filterToolTypes(data, config))
+	tools := data["tools"].([]any)
+	require.Len(t, tools, 2)
+	assert.Equal(t, "computer_toolset_20260801", tools[0].(map[string]any)["type"])
+	assert.Equal(t, "custom", tools[1].(map[string]any)["type"])
+}
+
+func TestFilterToolTypesDropsToolChoiceWhenAllRemoved(t *testing.T) {
+	// tools 变成空数组同样会被上游拒绝，tool_choice 也会变成悬空引用。
+	data := map[string]any{
+		"tools":       []any{map[string]any{"type": "computer_20250124"}},
+		"tool_choice": map[string]any{"type": "auto"},
+	}
+	config := map[string]any{"denied_types": []any{"computer_20250124"}}
+	require.True(t, filterToolTypes(data, config))
+	assert.NotContains(t, data, "tools")
+	assert.NotContains(t, data, "tool_choice")
+}
+
+func TestFilterToolTypesAllowlistFromConfigKeepsUpstreamTools(t *testing.T) {
+	// 内置白名单只有 4 种 type，会误删上游实际支持的 web_search / memory 等工具。
+	// 配了 allowed_types 后必须以配置为准。
+	data := map[string]any{"tools": []any{
+		map[string]any{"type": "web_search_20250305"},
+		map[string]any{"type": "memory_20250818"},
+		map[string]any{"type": "retired_tool"},
+	}}
+	config := map[string]any{
+		"allowed_types": []any{"web_search_20250305", "memory_20250818", "custom"},
+	}
+	require.True(t, filterToolTypes(data, config))
+	tools := data["tools"].([]any)
+	require.Len(t, tools, 2)
+	assert.Equal(t, "web_search_20250305", tools[0].(map[string]any)["type"])
+	assert.Equal(t, "memory_20250818", tools[1].(map[string]any)["type"])
+}
+
+func TestFilterToolTypesRenameWinsOverAllowlist(t *testing.T) {
+	// 改名后的 type 在 allowed 清单里，不能因为原名不在清单里就先被删掉。
+	data := map[string]any{"tools": []any{
+		map[string]any{"type": "computer_20250124"},
+	}}
+	config := map[string]any{
+		"allowed_types": []any{"computer_toolset_20260801"},
+		"rename_types":  map[string]any{"computer_20250124": "computer_toolset_20260801"},
+	}
+	require.True(t, filterToolTypes(data, config))
+	tools := data["tools"].([]any)
+	require.Len(t, tools, 1)
+	assert.Equal(t, "computer_toolset_20260801", tools[0].(map[string]any)["type"])
+}
+
+func TestFilterToolTypesFallsBackToAllowlistWithoutConfig(t *testing.T) {
+	// 没配参数时保持原有白名单行为，避免升级后旧配置行为突变。
+	data := map[string]any{"tools": []any{
+		map[string]any{"type": "bash_20250124"},
+		map[string]any{"type": "unknown_future_tool"},
+	}}
+	require.True(t, filterToolTypes(data, nil))
+	tools := data["tools"].([]any)
+	require.Len(t, tools, 1)
+	assert.Equal(t, "bash_20250124", tools[0].(map[string]any)["type"])
 }
 
 func TestFilterBetaHeaderDenylist(t *testing.T) {
@@ -307,4 +403,94 @@ func TestTruncateUTF8(t *testing.T) {
 	invalid := truncateUTF8("ab\xd1\x2ecd", 100)
 	assert.True(t, utf8.ValidString(invalid))
 	assert.Equal(t, "ab.cd", invalid)
+}
+
+func TestFixDanglingToolUseDropsUnansweredCall(t *testing.T) {
+	data := map[string]any{"messages": []any{
+		map[string]any{"role": "assistant", "content": []any{
+			map[string]any{"type": "text", "text": "let me check"},
+			map[string]any{"type": "tool_use", "id": "toolu_answered"},
+			map[string]any{"type": "tool_use", "id": "toolu_dangling"},
+		}},
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "toolu_answered"},
+		}},
+	}}
+	require.True(t, fixDanglingToolUse(data))
+	content := data["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	require.Len(t, content, 2)
+	assert.Equal(t, "text", content[0].(map[string]any)["type"])
+	assert.Equal(t, "toolu_answered", content[1].(map[string]any)["id"])
+}
+
+func TestFixDanglingToolUseIgnoresLastMessage(t *testing.T) {
+	// 最后一条消息没有"下一条"，以 tool_use 结尾是合法的，不能动。
+	data := map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": "hi"},
+		map[string]any{"role": "assistant", "content": []any{
+			map[string]any{"type": "tool_use", "id": "toolu_pending"},
+		}},
+	}}
+	assert.False(t, fixDanglingToolUse(data))
+	content := data["messages"].([]any)[1].(map[string]any)["content"].([]any)
+	assert.Len(t, content, 1)
+}
+
+func TestFixDanglingToolUseNeverEmptiesMessage(t *testing.T) {
+	data := map[string]any{"messages": []any{
+		map[string]any{"role": "assistant", "content": []any{
+			map[string]any{"type": "tool_use", "id": "toolu_dangling"},
+		}},
+		map[string]any{"role": "user", "content": "never mind"},
+	}}
+	require.True(t, fixDanglingToolUse(data))
+	content := data["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	require.Len(t, content, 1)
+	assert.Equal(t, "text", content[0].(map[string]any)["type"])
+}
+
+func TestFixToolNameSanitizesIllegalCharacters(t *testing.T) {
+	data := map[string]any{"tools": []any{
+		map[string]any{"name": "mcp__server::do thing!"},
+		map[string]any{"name": "already_legal-1"},
+	}}
+	require.True(t, fixToolName(data))
+	tools := data["tools"].([]any)
+	assert.Equal(t, "mcp__server__do_thing_", tools[0].(map[string]any)["name"])
+	assert.Equal(t, "already_legal-1", tools[1].(map[string]any)["name"])
+}
+
+func TestFixToolNameTruncatesAt128(t *testing.T) {
+	long := strings.Repeat("a", 200)
+	data := map[string]any{"tools": []any{map[string]any{"name": long}}}
+	require.True(t, fixToolName(data))
+	assert.Len(t, data["tools"].([]any)[0].(map[string]any)["name"], 128)
+}
+
+func TestStripToolFieldsRemovesNameOnToolsetEntry(t *testing.T) {
+	// toolset 条目的成员名固定，带 name 会被上游拒绝。
+	data := map[string]any{"tools": []any{
+		map[string]any{"type": "computer_20250124", "name": "computer", "display_width_px": 1024},
+	}}
+	config := map[string]any{
+		"rename_types": map[string]any{"computer_20250124": "computer_toolset_20260801"},
+		"strip_fields": map[string]any{"computer_toolset_20260801": []any{"name"}},
+	}
+	require.True(t, filterToolTypes(data, config))
+	tool := data["tools"].([]any)[0].(map[string]any)
+	assert.Equal(t, "computer_toolset_20260801", tool["type"])
+	assert.NotContains(t, tool, "name")
+	assert.Contains(t, tool, "display_width_px")
+}
+
+func TestFixTempTopPConflict(t *testing.T) {
+	both := map[string]any{"temperature": 0.7, "top_p": 0.9}
+	require.True(t, fixTempTopPConflict(both))
+	assert.Contains(t, both, "temperature")
+	assert.NotContains(t, both, "top_p")
+
+	// 只有一个时不能动，删掉会改变采样行为。
+	only := map[string]any{"top_p": 0.9}
+	assert.False(t, fixTempTopPConflict(only))
+	assert.Contains(t, only, "top_p")
 }

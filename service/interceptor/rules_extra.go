@@ -3,6 +3,7 @@ package interceptor
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -241,6 +242,36 @@ func fixDeferLoading(data map[string]any) bool {
 
 // fixOrphanToolResult 删掉找不到对应 tool_use 的 tool_result block。
 // 上游报 "unexpected `tool_use_id` found in `tool_result` blocks"。
+// orphanToolResultText 把被丢弃的孤儿 tool_result 还原成可读文本，
+// 避免降级过程丢掉工具返回的内容。
+func orphanToolResultText(orphans []any) string {
+	var sb strings.Builder
+	for _, o := range orphans {
+		b, ok := o.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch c := b["content"].(type) {
+		case string:
+			sb.WriteString(c)
+		case []any:
+			for _, item := range c {
+				block, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				if txt, ok := block["text"].(string); ok {
+					sb.WriteString(txt)
+				}
+			}
+		}
+	}
+	if sb.Len() == 0 {
+		return "(tool result omitted)"
+	}
+	return sb.String()
+}
+
 func fixOrphanToolResult(data map[string]any) bool {
 	msgs, ok := getMessages(data)
 	if !ok {
@@ -264,6 +295,7 @@ func fixOrphanToolResult(data map[string]any) bool {
 		}
 
 		filtered := make([]any, 0, len(content))
+		orphans := make([]any, 0, len(content))
 		for _, block := range content {
 			b, ok := block.(map[string]any)
 			if !ok {
@@ -273,18 +305,25 @@ func fixOrphanToolResult(data map[string]any) bool {
 			if t, _ := b["type"].(string); t == "tool_result" {
 				id, _ := b["tool_use_id"].(string)
 				if !available[id] {
+					orphans = append(orphans, b)
 					continue
 				}
 			}
 			filtered = append(filtered, block)
 		}
 
-		// 清空一条消息会连锁把整个 messages 变空，反而制造出更严重的错误
-		// （实测让后续的 reject_empty_messages 误拒了真实请求）。
-		// 这种情况下原样保留，让上游自己判断。
-		if len(filtered) == 0 {
-			filtered = content
-		} else if len(filtered) != len(content) {
+		// 丢掉全部块会让 messages 整体变空，连锁触发更严重的错误
+		// （实测让后续的 reject_empty_messages 误拒了真实请求）；但原样保留
+		// 孤儿 tool_result 上游同样会 400。改成把它降级成文本块，
+		// 消息不为空，也不含非法的 tool_result。
+		if len(filtered) == 0 && len(orphans) > 0 {
+			filtered = append(filtered, map[string]any{
+				"type": "text",
+				"text": orphanToolResultText(orphans),
+			})
+		}
+		// 降级成文本块时块数可能与原来相同，不能靠长度判断是否改动过。
+		if len(orphans) > 0 {
 			msg["content"] = filtered
 			changed = true
 		}
@@ -511,4 +550,128 @@ func getConfigStrings(config map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+// fixDanglingToolUse 删掉后面没有对应 tool_result 的 tool_use 块。
+// Anthropic 要求每个 tool_use 的下一条消息里必须紧跟同 id 的 tool_result，
+// 客户端中断或裁剪历史时会留下悬空的 tool_use，上游直接 400。
+// 最后一条消息不检查：它没有"下一条"，助手以 tool_use 结尾是合法的。
+func fixDanglingToolUse(data map[string]any) bool {
+	msgs, ok := getMessages(data)
+	if !ok || len(msgs) < 2 {
+		return false
+	}
+	changed := false
+	for i := 0; i < len(msgs)-1; i++ {
+		msg, ok := msgs[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		content, isArray := msg["content"].([]any)
+		if !isArray {
+			continue
+		}
+		answered := toolResultIDs(msgs[i+1])
+
+		filtered := make([]any, 0, len(content))
+		dangling := 0
+		for _, block := range content {
+			b, ok := block.(map[string]any)
+			if !ok {
+				filtered = append(filtered, block)
+				continue
+			}
+			if t, _ := b["type"].(string); t == "tool_use" {
+				id, _ := b["id"].(string)
+				if !answered[id] {
+					dangling++
+					continue
+				}
+			}
+			filtered = append(filtered, block)
+		}
+		if dangling == 0 {
+			continue
+		}
+		// 与孤儿 tool_result 同样的处理：不能让消息变空。
+		if len(filtered) == 0 {
+			filtered = append(filtered, map[string]any{
+				"type": "text",
+				"text": "(tool call omitted)",
+			})
+		}
+		msg["content"] = filtered
+		changed = true
+	}
+	return changed
+}
+
+func toolResultIDs(msg any) map[string]bool {
+	ids := map[string]bool{}
+	m, ok := msg.(map[string]any)
+	if !ok {
+		return ids
+	}
+	content, ok := m["content"].([]any)
+	if !ok {
+		return ids
+	}
+	for _, block := range content {
+		b, ok := block.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := b["type"].(string); t != "tool_result" {
+			continue
+		}
+		if id, ok := b["tool_use_id"].(string); ok {
+			ids[id] = true
+		}
+	}
+	return ids
+}
+
+// toolNamePattern 是上游对工具名的约束：^[a-zA-Z0-9_-]{1,128}$。
+var toolNameIllegal = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+
+// fixToolName 把不符合上游正则的工具名清洗成合法名字。
+// 非法字符替换成下划线，超长截断到 128。
+func fixToolName(data map[string]any) bool {
+	tools, ok := getTools(data)
+	if !ok {
+		return false
+	}
+	changed := false
+	for _, item := range tools {
+		tool, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, ok := tool["name"].(string)
+		if !ok || name == "" {
+			continue
+		}
+		clean := toolNameIllegal.ReplaceAllString(name, "_")
+		if len([]rune(clean)) > 128 {
+			clean = string([]rune(clean)[:128])
+		}
+		if clean != name {
+			tool["name"] = clean
+			changed = true
+		}
+	}
+	return changed
+}
+
+// fixTempTopPConflict 处理"temperature 和 top_p 不能同时指定"的模型。
+// 保留 temperature，删掉 top_p：temperature 是更常用的采样参数，
+// 客户端多数只是把两个都填了默认值。
+func fixTempTopPConflict(data map[string]any) bool {
+	_, hasTemp := data["temperature"]
+	_, hasTopP := data["top_p"]
+	if !hasTemp || !hasTopP {
+		return false
+	}
+	delete(data, "top_p")
+	return true
 }
