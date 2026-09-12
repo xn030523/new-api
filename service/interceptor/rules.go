@@ -34,6 +34,18 @@ const (
 	RuleStripAssistPrefill  = "strip_assist_prefill"  // 删末尾 assistant 消息
 	RuleFixAdditionalProps  = "fix_additional_props"  // additionalProperties 补 false
 
+	// 针对生产实测残留 400 报错补充的规则
+	RuleHoistSystem         = "hoist_system"           // messages 里的 system 消息上提到顶层
+	RuleFixEmptySystem      = "fix_empty_system"       // 顶层 system 去掉空 text block
+	RuleStripURLSource      = "strip_url_source"       // 删掉 source.type=url 的 block
+	RuleFixMessageRoles     = "fix_message_roles"      // 非法 role 归一到 user
+	RuleFixToolChoice       = "fix_tool_choice"        // 删掉不支持/悬空的 tool_choice
+	RuleFixDeferLoading     = "fix_defer_loading"      // 保证至少一个 tool 不 defer
+	RuleFixOrphanToolResult = "fix_orphan_tool_result" // 删掉悬空 tool_result
+	RuleRejectEmptyMessages = "reject_empty_messages"  // messages 为空时本地拒绝
+	RuleStripParamsForModel = "strip_params_for_model" // 按模型无条件删采样参数
+	RuleFixThinkingBudget   = "fix_thinking_budget"    // adaptive 下删 thinking.budget_tokens
+
 	// 自定义规则类型
 	RuleCustomDeletePath   = "custom_delete_path"    // 按路径删字段
 	RuleCustomSetValue     = "custom_set_value"      // 按路径设值
@@ -70,6 +82,16 @@ var AllRuleDescriptions = map[string]string{
 	RuleFixSchemaOneOf:      "删掉 oneOf/allOf/anyOf",
 	RuleStripAssistPrefill:  "删掉末尾 assistant 消息（不支持 prefill 时）",
 	RuleFixAdditionalProps:  "补充 additionalProperties: false",
+	RuleHoistSystem:         "把 messages 里的 system 消息上提到顶层 system",
+	RuleFixEmptySystem:      "去掉顶层 system 里的空 text block",
+	RuleStripURLSource:      "删掉 source.type=url 的图片/文档 block",
+	RuleFixMessageRoles:     "非法 role 归一到 user",
+	RuleFixToolChoice:       "删掉不支持或指向不存在工具的 tool_choice（config: denied_types）",
+	RuleFixDeferLoading:     "保证至少一个 tool 的 defer_loading 为 false",
+	RuleFixOrphanToolResult: "删掉没有对应 tool_use 的 tool_result",
+	RuleRejectEmptyMessages: "messages 为空时本地拒绝，不发上游",
+	RuleStripParamsForModel: "按模型无条件删除采样参数（config: models, params）",
+	RuleFixThinkingBudget:   "thinking 为 adaptive 时删掉非法的 budget_tokens",
 	RuleCustomDeletePath:    "自定义：按路径删除字段（config: path）",
 	RuleCustomSetValue:      "自定义：按路径设置值（config: path, value）",
 	RuleCustomDeleteKeyAll:  "自定义：递归删除所有同名字段（config: key）",

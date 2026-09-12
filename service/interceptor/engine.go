@@ -95,7 +95,7 @@ func ProcessRequest(channelId int, requestBody io.Reader, info *relaycommon.Rela
 	var appliedRules []string
 
 	for _, rule := range rules {
-		changed, rejectErr := applyRule(data, rule)
+		changed, rejectErr := applyRule(data, rule, upstreamModelName(data, info))
 		if rejectErr != nil {
 			// 记录拒绝日志
 			logInterceptor(channelId, info, rule.Type, "rejected", rejectErr.Error(), originalBody, originalBody)
@@ -134,14 +134,8 @@ func logInterceptor(channelId int, info *relaycommon.RelayInfo, ruleType, action
 	go func() {
 		// 限制 body 长度避免日志表膨胀
 		const maxBodyLen = 20000
-		origTrunc := originalBody
-		if len(origTrunc) > maxBodyLen {
-			origTrunc = origTrunc[:maxBodyLen] + "...(truncated)"
-		}
-		modTrunc := modifiedBody
-		if len(modTrunc) > maxBodyLen {
-			modTrunc = modTrunc[:maxBodyLen] + "...(truncated)"
-		}
+		origTrunc := truncateUTF8(originalBody, maxBodyLen)
+		modTrunc := truncateUTF8(modifiedBody, maxBodyLen)
 
 		// 提取模型名
 		modelName := ""
@@ -183,7 +177,7 @@ func logInterceptor(channelId int, info *relaycommon.RelayInfo, ruleType, action
 }
 
 // applyRule 执行单条规则，返回 (是否修改, 拒绝错误)
-func applyRule(data map[string]any, rule Rule) (bool, error) {
+func applyRule(data map[string]any, rule Rule, modelName string) (bool, error) {
 	switch rule.Type {
 	case RuleFixContentArray:
 		return fixContentArray(data), nil
@@ -238,6 +232,36 @@ func applyRule(data map[string]any, rule Rule) (bool, error) {
 		return stripAssistantPrefill(data), nil
 	case RuleFixAdditionalProps:
 		return fixAdditionalProperties(data), nil
+
+	// 针对生产实测残留 400 报错补充的规则
+	case RuleHoistSystem:
+		return hoistSystemMessages(data), nil
+	case RuleFixEmptySystem:
+		return fixEmptySystem(data), nil
+	case RuleStripURLSource:
+		return stripURLSources(data), nil
+	case RuleFixMessageRoles:
+		return fixMessageRoles(data), nil
+	case RuleFixToolChoice:
+		denied := getConfigStrings(rule.Config, "denied_types")
+		if len(denied) == 0 {
+			denied = []string{"tool", "any"}
+		}
+		return fixToolChoice(data, denied), nil
+	case RuleFixDeferLoading:
+		return fixDeferLoading(data), nil
+	case RuleFixOrphanToolResult:
+		return fixOrphanToolResult(data), nil
+	case RuleRejectEmptyMessages:
+		return false, rejectEmptyMessages(data)
+	case RuleFixThinkingBudget:
+		return fixThinkingBudget(data), nil
+	case RuleStripParamsForModel:
+		params := getConfigStrings(rule.Config, "params")
+		if len(params) == 0 {
+			params = []string{"temperature", "top_p", "top_k"}
+		}
+		return stripParamsForModel(data, modelName, getConfigStrings(rule.Config, "models"), params), nil
 
 	// 自定义规则
 	case RuleCustomDeletePath:
@@ -709,13 +733,14 @@ func fixEffort(data map[string]any) bool {
 	if isThinkingEnabled(data) {
 		return false
 	}
+	// thinking 关闭时上游同时拒绝 max 和 xhigh，都降到 high。
 	if oc, ok := data["output_config"].(map[string]any); ok {
-		if oc["effort"] == "max" {
+		if effort, _ := oc["effort"].(string); effort == "max" || effort == "xhigh" {
 			oc["effort"] = "high"
 			return true
 		}
 	}
-	if data["effort"] == "max" {
+	if effort, _ := data["effort"].(string); effort == "max" || effort == "xhigh" {
 		data["effort"] = "high"
 		return true
 	}

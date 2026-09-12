@@ -1,10 +1,11 @@
-import { useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Shield } from 'lucide-react'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -94,139 +95,150 @@ export function Interceptors() {
   const interceptors = interceptorsQuery.data ?? []
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5" />
-          <h2 className="text-lg font-semibold">{t('Request Interceptors')}</h2>
-        </div>
-        <Button onClick={handleCreate} size="sm">
-          <Plus className="mr-1 h-4 w-4" />
+    <SectionPageLayout>
+      <SectionPageLayout.Title>
+        <span className='flex items-center gap-2'>
+          <Shield className='h-5 w-5' aria-hidden='true' />
+          {t('Request Interceptors')}
+        </span>
+      </SectionPageLayout.Title>
+      <SectionPageLayout.Actions>
+        <Button onClick={handleCreate} size='sm'>
+          <Plus className='mr-1 h-4 w-4' />
           {t('Create Interceptor')}
         </Button>
-      </div>
+      </SectionPageLayout.Actions>
+      <SectionPageLayout.Content>
+        <div className='space-y-6'>
+          <p className='text-muted-foreground text-sm'>
+            {t(
+              'Interceptors process and fix request JSON before sending to upstream APIs. Use built-in rules for common fixes or custom rules for new error patterns.'
+            )}
+          </p>
 
-      <p className="text-sm text-muted-foreground">
-        {t(
-          'Interceptors process and fix request JSON before sending to upstream APIs. Use built-in rules for common fixes or custom rules for new error patterns.'
-        )}
-      </p>
+          {interceptorsQuery.isLoading && (
+            <p className='text-muted-foreground text-sm'>{t('Loading...')}</p>
+          )}
 
-      {interceptorsQuery.isLoading && (
-        <p className="text-sm text-muted-foreground">{t('Loading...')}</p>
-      )}
-
-      {interceptors.length === 0 && !interceptorsQuery.isLoading && (
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            {t('No interceptors configured yet. Create one to get started.')}
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-4">
-        {interceptors.map((item) => {
-          const rules = parseRules(item.rules)
-          return (
-            <Card key={item.id}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Switch
-                      checked={item.enabled}
-                      onCheckedChange={() => toggleMutation.mutate(item)}
-                    />
-                    <CardTitle className="text-base">{item.name}</CardTitle>
-                    <Badge variant={item.channel_id === 0 ? 'default' : 'outline'}>
-                      {item.channel_id === 0
-                        ? t('Global')
-                        : `Channel #${item.channel_id}`}
-                    </Badge>
-                    {item.priority > 0 && (
-                      <Badge variant="secondary">
-                        Priority: {item.priority}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEdit(item)}
-                    >
-                      {t('Edit')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => setDeleteId(item.id)}
-                    >
-                      {t('Delete')}
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                {item.description && (
-                  <p className="text-sm text-muted-foreground mb-2">
-                    {item.description}
-                  </p>
+          {interceptors.length === 0 && !interceptorsQuery.isLoading && (
+            <Card>
+              <CardContent className='text-muted-foreground py-8 text-center'>
+                {t(
+                  'No interceptors configured yet. Create one to get started.'
                 )}
-                <div className="flex flex-wrap gap-1.5">
-                  {rules.map((rule) => {
-                    const ruleKey = `${rule.type}-${JSON.stringify(rule.config ?? {})}`
-                    return (
-                      <Badge
-                        key={ruleKey}
-                        variant="secondary"
-                        className="text-xs"
-                        title={rule.type}
-                      >
-                        {ruleTypes[rule.type] ?? rule.type}
-                        {rule.config &&
-                          Object.keys(rule.config).length > 0 &&
-                          ` (${Object.entries(rule.config)
-                            .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-                            .join(', ')})`}
-                      </Badge>
-                    )
-                  })}
-                  {rules.length === 0 && (
-                    <span className="text-xs text-muted-foreground">
-                      {t('No rules')}
-                    </span>
-                  )}
-                </div>
               </CardContent>
             </Card>
-          )
-        })}
-      </div>
+          )}
 
-      <InterceptorEditDialog
-        open={editDialogOpen}
-        onOpenChange={setEditDialogOpen}
-        interceptor={editingInterceptor}
-      />
+          <div className='grid gap-4'>
+            {interceptors.map((item) => {
+              const rules = parseRules(item.rules)
+              return (
+                <Card key={item.id}>
+                  <CardHeader className='pb-3'>
+                    <div className='flex items-center justify-between'>
+                      <div className='flex items-center gap-3'>
+                        <Switch
+                          checked={item.enabled}
+                          onCheckedChange={() => toggleMutation.mutate(item)}
+                        />
+                        <CardTitle className='text-base'>{item.name}</CardTitle>
+                        <Badge
+                          variant={
+                            item.channel_id === 0 ? 'default' : 'outline'
+                          }
+                        >
+                          {item.channel_id === 0
+                            ? t('Global')
+                            : `Channel #${item.channel_id}`}
+                        </Badge>
+                        {item.priority > 0 && (
+                          <Badge variant='secondary'>
+                            Priority: {item.priority}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className='flex items-center gap-2'>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => handleEdit(item)}
+                        >
+                          {t('Edit')}
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='sm'
+                          className='text-destructive'
+                          onClick={() => setDeleteId(item.id)}
+                        >
+                          {t('Delete')}
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className='pt-0'>
+                    {item.description && (
+                      <p className='text-muted-foreground mb-2 text-sm'>
+                        {item.description}
+                      </p>
+                    )}
+                    <div className='flex flex-wrap gap-1.5'>
+                      {rules.map((rule) => {
+                        const ruleKey = `${rule.type}-${JSON.stringify(rule.config ?? {})}`
+                        return (
+                          <Badge
+                            key={ruleKey}
+                            variant='secondary'
+                            className='text-xs'
+                            title={rule.type}
+                          >
+                            {ruleTypes[rule.type] ?? rule.type}
+                            {rule.config &&
+                              Object.keys(rule.config).length > 0 &&
+                              ` (${Object.entries(rule.config)
+                                .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                                .join(', ')})`}
+                          </Badge>
+                        )
+                      })}
+                      {rules.length === 0 && (
+                        <span className='text-muted-foreground text-xs'>
+                          {t('No rules')}
+                        </span>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
 
-      <ConfirmDialog
-        open={deleteId !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteId(null)
-        }}
-        title={t('Delete Interceptor')}
-        desc={t(
-          'Are you sure you want to delete this interceptor? This action cannot be undone.'
-        )}
-        handleConfirm={() => {
-          if (deleteId !== null) {
-            deleteMutation.mutate(deleteId)
-          }
-        }}
-        destructive
-        isLoading={deleteMutation.isPending}
-      />
-    </div>
+          <InterceptorEditDialog
+            open={editDialogOpen}
+            onOpenChange={setEditDialogOpen}
+            interceptor={editingInterceptor}
+          />
+
+          <ConfirmDialog
+            open={deleteId !== null}
+            onOpenChange={(open) => {
+              if (!open) setDeleteId(null)
+            }}
+            title={t('Delete Interceptor')}
+            desc={t(
+              'Are you sure you want to delete this interceptor? This action cannot be undone.'
+            )}
+            handleConfirm={() => {
+              if (deleteId !== null) {
+                deleteMutation.mutate(deleteId)
+              }
+            }}
+            destructive
+            isLoading={deleteMutation.isPending}
+          />
+        </div>
+      </SectionPageLayout.Content>
+    </SectionPageLayout>
   )
 }

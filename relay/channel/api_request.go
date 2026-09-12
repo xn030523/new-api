@@ -343,6 +343,10 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+
+	// 拦截器：header 层过滤。body 拦截跑在 http.Request 构造之前，那时还没有 header，
+	// 所以 anthropic-beta 这类 header 只能在这里处理。
+	interceptor.ProcessHeaders(info.ChannelId, req.Header, info.OriginModelName)
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -375,6 +379,10 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+
+	// 拦截器：header 层过滤。body 拦截跑在 http.Request 构造之前，那时还没有 header，
+	// 所以 anthropic-beta 这类 header 只能在这里处理。
+	interceptor.ProcessHeaders(info.ChannelId, req.Header, info.OriginModelName)
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
