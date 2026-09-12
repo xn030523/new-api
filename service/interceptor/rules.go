@@ -46,6 +46,7 @@ const (
 	RuleFixDanglingToolUse  = "fix_dangling_tool_use"  // 删掉后面没有 tool_result 的 tool_use
 	RuleFixToolName         = "fix_tool_name"          // 清洗非法工具名
 	RuleFixTempTopPConflict = "fix_temp_topp_conflict" // temperature 与 top_p 互斥时删 top_p
+	RuleRejectLargeBody     = "reject_large_body"      // 请求体字节数超限时本地拒绝
 	RuleStripParamsForModel = "strip_params_for_model" // 按模型无条件删采样参数
 	RuleFixThinkingBudget   = "fix_thinking_budget"    // adaptive 下删 thinking.budget_tokens
 
@@ -96,6 +97,7 @@ var AllRuleDescriptions = map[string]string{
 	RuleFixDanglingToolUse:  "删掉后面没有紧跟 tool_result 的 tool_use",
 	RuleFixToolName:         "清洗不符合 ^[a-zA-Z0-9_-]{1,128}$ 的工具名",
 	RuleFixTempTopPConflict: "temperature 与 top_p 不能同时指定时删掉 top_p",
+	RuleRejectLargeBody:     "请求体字节数超过上限时本地拒绝，不发上游",
 	RuleStripParamsForModel: "按模型无条件删除采样参数（config: models, params）",
 	RuleFixThinkingBudget:   "thinking 为 adaptive 时删掉非法的 budget_tokens",
 	RuleCustomDeletePath:    "自定义：按路径删除字段（config: path）",

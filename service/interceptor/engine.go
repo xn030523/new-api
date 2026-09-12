@@ -84,6 +84,12 @@ func ProcessRequest(channelId int, requestBody io.Reader, info *relaycommon.Rela
 		return nil, fmt.Errorf("interceptor read body failed: %w", err)
 	}
 
+	// 体积检查放在解析之前：超大 body 解析本身就是浪费。
+	if ruleType, err := rejectLargeBody(rules, len(bodyBytes)); err != nil {
+		logInterceptor(channelId, info, ruleType, "rejected", err.Error(), "", "")
+		return nil, err
+	}
+
 	// 解析 JSON
 	var data map[string]any
 	if err := common.Unmarshal(bodyBytes, &data); err != nil {

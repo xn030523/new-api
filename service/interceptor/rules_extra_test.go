@@ -494,3 +494,33 @@ func TestFixTempTopPConflict(t *testing.T) {
 	assert.False(t, fixTempTopPConflict(only))
 	assert.Contains(t, only, "top_p")
 }
+
+func TestRejectLargeBodyOverLimit(t *testing.T) {
+	rules := []Rule{{Type: RuleRejectLargeBody, Config: map[string]any{"max_bytes": 1000}}}
+
+	ruleType, err := rejectLargeBody(rules, 1001)
+	require.Error(t, err)
+	assert.Equal(t, RuleRejectLargeBody, ruleType)
+	assert.Contains(t, err.Error(), "1001")
+
+	// 正好等于上限要放行，边界不能误拒。
+	_, err = rejectLargeBody(rules, 1000)
+	require.NoError(t, err)
+}
+
+func TestRejectLargeBodySkippedWhenRuleAbsent(t *testing.T) {
+	// 没配这条规则时，多大的 body 都不拦。
+	_, err := rejectLargeBody([]Rule{{Type: RuleFixToolName}}, 999999999)
+	assert.NoError(t, err)
+}
+
+func TestRejectLargeBodyDefaultLimitIs30MB(t *testing.T) {
+	rules := []Rule{{Type: RuleRejectLargeBody}}
+
+	_, err := rejectLargeBody(rules, 30*1024*1024)
+	require.NoError(t, err)
+
+	// 生产实测的 33491491 字节必须被拦下。
+	_, err = rejectLargeBody(rules, 33491491)
+	require.Error(t, err)
+}

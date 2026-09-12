@@ -675,3 +675,22 @@ func fixTempTopPConflict(data map[string]any) bool {
 	delete(data, "top_p")
 	return true
 }
+
+// rejectLargeBody 在解析 JSON 之前按原始字节数拦截过大的请求。
+// reject_long_prompt 只累加 text 字段的长度，base64 图片撑出来的体积它看不到，
+// 所以 33MB 的请求体会一路发到上游再被拒，白花一次往返和出网带宽。
+// 返回命中的规则类型，供调用方写拦截日志。
+func rejectLargeBody(rules []Rule, size int) (string, error) {
+	for _, rule := range rules {
+		if rule.Type != RuleRejectLargeBody {
+			continue
+		}
+		maxBytes := getConfigInt(rule.Config, "max_bytes", 30*1024*1024)
+		if maxBytes > 0 && size > maxBytes {
+			return rule.Type, fmt.Errorf(
+				"请求体过大：%d 字节，超过上限 %d 字节", size, maxBytes)
+		}
+		return "", nil
+	}
+	return "", nil
+}
