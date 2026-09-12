@@ -63,6 +63,7 @@ type MonitorSettings struct {
 	ChartFontPath   string `json:"chart_font_path"`
 	ExcludeUsers    string `json:"exclude_users"`
 	ExcludeRemarks  string `json:"exclude_remarks"`
+	IncludeGroups   string `json:"include_groups"`
 	ActiveUsersOnly bool   `json:"active_users_only"`
 	MaskUsername    bool   `json:"mask_username"`
 	CurrencySymbol  string `json:"currency_symbol"`

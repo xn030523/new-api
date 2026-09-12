@@ -1,6 +1,7 @@
 package tgbot
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,13 +16,47 @@ const (
 	logTypeError   = 5
 )
 
+// groupColumn returns the dialect-correct quoting for the reserved-word
+// "group" column so the users query works on SQLite/MySQL/PostgreSQL alike.
+func groupColumn() string {
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		return `"group"`
+	}
+	return "`group`"
+}
+
 // Stats aggregates monitoring statistics for a time window.
 type Stats struct {
 	RPM          int
 	TPM          int
+	TodayTotal   int
+	Users        []UserStat
+	Groups       []GroupStat
 	TodaySpend   []UserSpend
 	AllTimeSpend []GroupSpend
 	ErrorCount   int
+}
+
+// UserStat is one user's row in the monitoring dashboard: today's spend plus
+// live RPM/TPM (last 60s), the user's remark group and all-time spend.
+type UserStat struct {
+	UserID  int
+	Name    string
+	Today   int
+	RPM     int
+	TPM     int
+	Remark  string
+	AllTime int
+}
+
+// GroupStat aggregates one remark group for the dashboard.
+type GroupStat struct {
+	Remark  string
+	Users   []UserStat
+	Today   int
+	AllTime int
+	RPM     int
+	TPM     int
 }
 
 type UserSpend struct {
@@ -60,24 +95,6 @@ func splitExcludeList(raw string) []string {
 	return out
 }
 
-func applyMonitorFilters(query *gorm.DB, settings *MonitorSettings) *gorm.DB {
-	if settings == nil {
-		return query
-	}
-	if excluded := splitExcludeList(settings.ExcludeUsers); len(excluded) > 0 {
-		query = query.Where("username NOT IN ?", excluded)
-	}
-	if settings.ActiveUsersOnly {
-		var activeUsers []string
-		if err := model.DB.Table("users").Where("status = ?", 1).Pluck("username", &activeUsers).Error; err != nil {
-			common.SysError("tgbot: failed to load active users: " + err.Error())
-		} else if len(activeUsers) > 0 {
-			query = query.Where("username IN ?", activeUsers)
-		}
-	}
-	return query
-}
-
 func applyBillingFilters(query *gorm.DB, settings *BillingSettings) *gorm.DB {
 	if settings == nil {
 		return query
@@ -95,59 +112,152 @@ func applyBillingFilters(query *gorm.DB, settings *BillingSettings) *gorm.DB {
 func FetchStats(minutes int, settings *MonitorSettings) (*Stats, error) {
 	stats := &Stats{}
 	minutes = max(minutes, 1)
-	since := common.GetTimestamp() - int64(minutes)*60
+	now := time.Now()
+	since := now.Unix() - int64(minutes)*60
+	todayStart := now.Truncate(24 * time.Hour).Unix()
 
-	var requestCount int64
-	requestQuery := applyMonitorFilters(
-		model.DB.Table("logs").Where("created_at >= ? AND type = ?", since, logTypeConsume), settings)
-	if err := requestQuery.Count(&requestCount).Error; err != nil {
+	excludeUsers := splitExcludeList(settings.ExcludeUsers)
+	excludeRemarks := splitExcludeList(settings.ExcludeRemarks)
+	includeGroups := splitExcludeList(settings.IncludeGroups)
+
+	// Load the users that count toward the dashboard, keyed by username. This
+	// scopes every later aggregate: active + include_groups + exclude_remarks +
+	// exclude_users are all resolved here in one place, cross-DB.
+	type userRow struct {
+		Id        int
+		Username  string
+		Remark    string
+		UsedQuota int
+	}
+	userQuery := model.DB.Table("users").
+		Select("id, username, remark, used_quota").
+		Where("deleted_at IS NULL")
+	if settings == nil || settings.ActiveUsersOnly {
+		userQuery = userQuery.Where("status = ?", 1)
+	}
+	if len(includeGroups) > 0 {
+		userQuery = userQuery.Where(groupColumn()+" IN ?", includeGroups)
+	}
+	if len(excludeRemarks) > 0 {
+		userQuery = userQuery.Where("COALESCE(remark, '') NOT IN ?", excludeRemarks)
+	}
+	if len(excludeUsers) > 0 {
+		userQuery = userQuery.Where("username NOT IN ?", excludeUsers)
+	}
+	var userRows []userRow
+	if err := userQuery.Scan(&userRows).Error; err != nil {
 		return nil, err
 	}
-	stats.RPM = int(requestCount) / minutes
 
-	var tokenSum struct {
-		Total int64
+	users := make(map[string]*UserStat, len(userRows))
+	var usernames []string
+	for _, u := range userRows {
+		if u.Username == "" {
+			continue
+		}
+		users[u.Username] = &UserStat{
+			UserID:  u.Id,
+			Name:    u.Username,
+			Remark:  u.Remark,
+			AllTime: u.UsedQuota,
+		}
+		usernames = append(usernames, u.Username)
 	}
-	tokenQuery := applyMonitorFilters(
-		model.DB.Table("logs").Where("created_at >= ? AND type = ?", since, logTypeConsume), settings)
-	if err := tokenQuery.
-		Select("COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total").
-		Scan(&tokenSum).Error; err != nil {
-		return nil, err
+	if len(usernames) == 0 {
+		stats.Users = nil
+		stats.Groups = nil
+		return stats, nil
 	}
-	stats.TPM = int(tokenSum.Total) / minutes
 
-	todayStart := time.Now().Truncate(24 * time.Hour).Unix()
-	todayQuery := applyMonitorFilters(
-		model.DB.Table("logs").Where("created_at >= ? AND type = ?", todayStart, logTypeConsume), settings)
-	if err := todayQuery.
+	// Today's spend per user (00:00 → now), scoped to the loaded users.
+	var todayRows []struct {
+		Username string
+		Quota    int
+	}
+	if err := model.DB.Table("logs").
 		Select("username, COALESCE(SUM(quota), 0) AS quota").
+		Where("type = ? AND created_at >= ? AND username IN ?", logTypeConsume, todayStart, usernames).
 		Group("username").
-		Order("quota DESC").
-		Limit(20).
-		Scan(&stats.TodaySpend).Error; err != nil {
+		Scan(&todayRows).Error; err != nil {
 		return nil, err
+	}
+	for _, r := range todayRows {
+		if u, ok := users[r.Username]; ok {
+			u.Today = r.Quota
+			stats.TodayTotal += r.Quota
+		}
 	}
 
-	// All-time spend by remark — use billing-style join but with monitor filters
-	remarkQuery := model.DB.Table("logs").
-		Joins("JOIN users ON users.username = logs.username").
-		Where("logs.type = ?", logTypeConsume)
-	if excluded := splitExcludeList(settings.ExcludeUsers); len(excluded) > 0 {
-		remarkQuery = remarkQuery.Where("logs.username NOT IN ?", excluded)
+	// Live RPM/TPM per user over the last window, scoped to the loaded users.
+	var liveRows []struct {
+		Username string
+		Reqs     int
+		Tokens   int
 	}
-	if excludedRemarks := splitExcludeList(settings.ExcludeRemarks); len(excludedRemarks) > 0 {
-		remarkQuery = remarkQuery.Where("users.remark NOT IN ?", excludedRemarks)
-	}
-	if settings.ActiveUsersOnly {
-		remarkQuery = remarkQuery.Where("users.status = ?", 1)
-	}
-	if err := remarkQuery.
-		Select("users.remark AS remark, COALESCE(SUM(logs.quota), 0) AS quota").
-		Group("users.remark").
-		Order("quota DESC").
-		Scan(&stats.AllTimeSpend).Error; err != nil {
+	if err := model.DB.Table("logs").
+		Select("username, COUNT(*) AS reqs, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens").
+		Where("type = ? AND created_at >= ? AND username IN ?", logTypeConsume, since, usernames).
+		Group("username").
+		Scan(&liveRows).Error; err != nil {
 		return nil, err
+	}
+	for _, r := range liveRows {
+		if u, ok := users[r.Username]; ok {
+			u.RPM = r.Reqs / minutes
+			u.TPM = r.Tokens / minutes
+			stats.RPM += u.RPM
+			stats.TPM += u.TPM
+		}
+	}
+
+	// Group users by remark, computing per-group aggregates.
+	groupMap := make(map[string]*GroupStat)
+	for _, u := range users {
+		g, ok := groupMap[u.Remark]
+		if !ok {
+			g = &GroupStat{Remark: u.Remark}
+			groupMap[u.Remark] = g
+		}
+		g.Users = append(g.Users, *u)
+		g.Today += u.Today
+		g.AllTime += u.AllTime
+		g.RPM += u.RPM
+		g.TPM += u.TPM
+	}
+
+	// Sort groups: non-empty remark first, then by today's spend desc, empty
+	// remark last. Users within a group by today's spend desc.
+	groups := make([]GroupStat, 0, len(groupMap))
+	for _, g := range groupMap {
+		slices.SortFunc(g.Users, func(a, b UserStat) int { return b.Today - a.Today })
+		groups = append(groups, *g)
+	}
+	slices.SortFunc(groups, func(a, b GroupStat) int {
+		aEmpty, bEmpty := a.Remark == "", b.Remark == ""
+		if aEmpty != bEmpty {
+			if aEmpty {
+				return 1
+			}
+			return -1
+		}
+		return b.Today - a.Today
+	})
+	stats.Groups = groups
+
+	// Flat user list (today spend desc) for the text fallback and TodaySpend.
+	flat := make([]UserStat, 0, len(users))
+	for _, u := range users {
+		flat = append(flat, *u)
+	}
+	slices.SortFunc(flat, func(a, b UserStat) int { return b.Today - a.Today })
+	stats.Users = flat
+	for _, u := range flat {
+		if u.Today > 0 {
+			stats.TodaySpend = append(stats.TodaySpend, UserSpend{Username: u.Name, Quota: u.Today})
+		}
+	}
+	for _, g := range groups {
+		stats.AllTimeSpend = append(stats.AllTimeSpend, GroupSpend{Remark: g.Remark, Quota: g.AllTime})
 	}
 
 	var errCount int64
