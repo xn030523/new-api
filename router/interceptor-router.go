@@ -18,6 +18,7 @@ func registerInterceptorRoutes(apiRouter *gin.RouterGroup) {
 		interceptorRoute.DELETE("/:id", controller.DeleteInterceptor)
 		// 拦截日志
 		interceptorRoute.GET("/logs/", controller.GetAllInterceptorLogs)
+		interceptorRoute.GET("/logs/stats", controller.GetInterceptorLogStats)
 		interceptorRoute.DELETE("/logs/:id", controller.DeleteInterceptorLog)
 		interceptorRoute.DELETE("/logs/", controller.ClearInterceptorLogs)
 	}

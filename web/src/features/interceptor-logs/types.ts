@@ -23,6 +23,32 @@ export interface GetInterceptorLogsParams {
   channel_id?: number
   action?: string
   model_name?: string
+  rule_type?: string
+  start?: number
+  end?: number
+}
+
+export interface InterceptorLogStatRow {
+  key: string
+  total: number
+  modified: number
+  rejected: number
+}
+
+export interface InterceptorLogStats {
+  total: number
+  modified: number
+  rejected: number
+  by_user: InterceptorLogStatRow[]
+  by_rule: InterceptorLogStatRow[]
+  by_model: InterceptorLogStatRow[]
+  by_channel: InterceptorLogStatRow[]
+}
+
+export interface GetInterceptorLogStatsResponse {
+  success: boolean
+  message?: string
+  data?: InterceptorLogStats
 }
 
 export interface GetInterceptorLogsResponse {

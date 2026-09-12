@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Check, Copy, Eye } from 'lucide-react'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -46,7 +46,7 @@ export function useInterceptorLogsColumns(): ColumnDef<InterceptorLog>[] {
       accessorKey: 'rule_type',
       header: t('Rule'),
       cell: ({ row }) => (
-        <Badge variant="secondary" className="text-xs font-mono">
+        <Badge variant='secondary' className='font-mono text-xs'>
           {row.original.rule_type}
         </Badge>
       ),
@@ -57,9 +57,17 @@ export function useInterceptorLogsColumns(): ColumnDef<InterceptorLog>[] {
       cell: ({ row }) => {
         const action = row.original.action
         if (action === 'rejected') {
-          return <Badge variant="destructive" className="text-xs">{t('Rejected')}</Badge>
+          return (
+            <Badge variant='destructive' className='text-xs'>
+              {t('Rejected')}
+            </Badge>
+          )
         }
-        return <Badge variant="default" className="text-xs">{t('Modified')}</Badge>
+        return (
+          <Badge variant='default' className='text-xs'>
+            {t('Modified')}
+          </Badge>
+        )
       },
     },
     {
@@ -69,7 +77,10 @@ export function useInterceptorLogsColumns(): ColumnDef<InterceptorLog>[] {
         const reason = row.original.reject_reason
         if (!reason) return '-'
         return (
-          <span className="text-xs text-muted-foreground max-w-[200px] truncate block" title={reason}>
+          <span
+            className='text-muted-foreground block max-w-[200px] truncate text-xs'
+            title={reason}
+          >
             {reason}
           </span>
         )
@@ -82,26 +93,29 @@ export function useInterceptorLogsColumns(): ColumnDef<InterceptorLog>[] {
         const log = row.original
         const [dialogOpen, setDialogOpen] = useState(false)
         const { t } = useTranslation()
-        const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
+        const { copiedText, copyToClipboard } = useCopyToClipboard({
+          notify: false,
+        })
 
-        const preview = log.request_body.length > 80
-          ? log.request_body.slice(0, 80) + '...'
-          : log.request_body
+        const preview =
+          log.request_body.length > 80
+            ? `${log.request_body.slice(0, 80)}...`
+            : log.request_body
 
         return (
-          <div className="flex items-center gap-1">
+          <div className='flex items-center gap-1'>
             <button
-              type="button"
-              className="group flex items-center gap-1 text-left text-xs text-muted-foreground hover:text-foreground transition-colors max-w-[300px]"
+              type='button'
+              className='group text-muted-foreground hover:text-foreground flex max-w-[300px] items-center gap-1 text-left text-xs transition-colors'
               onClick={() => setDialogOpen(true)}
             >
-              <span className="truncate font-mono">{preview}</span>
-              <Eye className="size-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <span className='truncate font-mono'>{preview}</span>
+              <Eye className='size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100' />
             </button>
             <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 w-5 p-0 shrink-0"
+              variant='ghost'
+              size='sm'
+              className='h-5 w-5 shrink-0 p-0'
               onClick={(e) => {
                 e.stopPropagation()
                 copyToClipboard(log.request_body)
@@ -109,9 +123,9 @@ export function useInterceptorLogsColumns(): ColumnDef<InterceptorLog>[] {
               title={t('Copy request body')}
             >
               {copiedText === log.request_body ? (
-                <Check className="size-3 text-green-600" />
+                <Check className='size-3 text-green-600' />
               ) : (
-                <Copy className="size-3" />
+                <Copy className='size-3' />
               )}
             </Button>
             <InterceptorLogDetailDialog

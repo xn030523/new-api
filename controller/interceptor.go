@@ -88,8 +88,12 @@ func GetAllInterceptorLogs(c *gin.Context) {
 	channelId, _ := strconv.Atoi(c.Query("channel_id"))
 	action := c.Query("action")
 	modelName := c.Query("model_name")
+	ruleType := c.Query("rule_type")
+	start, _ := strconv.ParseInt(c.Query("start"), 10, 64)
+	end, _ := strconv.ParseInt(c.Query("end"), 10, 64)
 
-	logs, total, err := model.GetAllInterceptorLogs(page, pageSize, username, channelId, action, modelName)
+	logs, total, err := model.GetAllInterceptorLogs(page, pageSize, username, channelId,
+		action, modelName, ruleType, start, end)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return
@@ -102,6 +106,19 @@ func GetAllInterceptorLogs(c *gin.Context) {
 			"page":  page,
 		},
 	})
+}
+
+func GetInterceptorLogStats(c *gin.Context) {
+	start, _ := strconv.ParseInt(c.Query("start"), 10, 64)
+	end, _ := strconv.ParseInt(c.Query("end"), 10, 64)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	stats, err := model.GetInterceptorLogStats(start, end, limit)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
 }
 
 func DeleteInterceptorLog(c *gin.Context) {
