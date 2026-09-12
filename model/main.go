@@ -372,6 +372,8 @@ func migrateDB() error {
 		&AuthzRole{},
 		&ChannelInterceptor{},
 		&InterceptorLog{},
+		&TgBotConfigRow{},
+		&TgBotFeatureRow{},
 	)
 	if err != nil {
 		return err

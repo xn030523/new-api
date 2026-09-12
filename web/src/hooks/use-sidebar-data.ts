@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  Bot,
   Box,
   ClipboardList,
   CreditCard,
@@ -147,6 +148,11 @@ export function useSidebarData(): SidebarData {
             title: t('Interceptor Logs'),
             url: '/interceptor-logs',
             icon: ScrollText,
+          },
+          {
+            title: t('TG Bot'),
+            url: '/tgbot',
+            icon: Bot,
           },
           {
             title: t('Models'),

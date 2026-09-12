@@ -383,5 +383,8 @@ func InitResources() error {
 		common.SysLog("interceptor rules loaded")
 	}
 
+	// 启动 TG Bot
+	controller.InitTgBot()
+
 	return nil
 }
