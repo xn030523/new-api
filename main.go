@@ -23,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service/interceptor"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
@@ -374,6 +375,13 @@ func InitResources() error {
 	}
 
 	service.StartAuthArtifactCleanup()
+
+	// 加载拦截器规则缓存
+	if err := interceptor.ReloadCache(); err != nil {
+		common.SysError("failed to load interceptor cache: " + err.Error())
+	} else {
+		common.SysLog("interceptor rules loaded")
+	}
 
 	return nil
 }

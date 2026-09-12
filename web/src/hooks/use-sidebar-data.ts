@@ -32,6 +32,7 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
+  ScrollText,
   Ticket,
   User,
   Users,
@@ -136,6 +137,16 @@ export function useSidebarData(): SidebarData {
             title: t('Channels'),
             url: '/channels',
             icon: Radio,
+          },
+          {
+            title: t('Interceptors'),
+            url: '/interceptors',
+            icon: ShieldCheck,
+          },
+          {
+            title: t('Interceptor Logs'),
+            url: '/interceptor-logs',
+            icon: ScrollText,
           },
           {
             title: t('Models'),

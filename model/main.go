@@ -370,6 +370,8 @@ func migrateDB() error {
 		&SystemTaskLock{},
 		&CasbinRule{},
 		&AuthzRole{},
+		&ChannelInterceptor{},
+		&InterceptorLog{},
 	)
 	if err != nil {
 		return err
