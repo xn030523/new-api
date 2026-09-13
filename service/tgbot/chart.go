@@ -7,7 +7,6 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
-	"math"
 	"os"
 	"strings"
 
@@ -16,42 +15,51 @@ import (
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 )
 
-// Dashboard canvas geometry.
+// Dashboard canvas geometry. Height is computed per render from the number of
+// ranking rows, mirroring the Python dashboard's auto-sizing behaviour.
 const (
-	chartWidth      = 1000
-	chartHeight     = 620
-	chartPadding    = 32
-	chartHeaderH    = 96
-	chartPanelGap   = 20
-	chartBarHeight  = 26
-	chartBarGap     = 10
-	chartMaxBars    = 8
+	chartWidth      = 1180
+	chartPadding    = 34
+	chartCardTop    = 96
+	chartCardHeight = 108
+	chartCardGap    = 20
+	chartRowHeight  = 40
+	chartRankTop    = 40 // gap between KPI cards and the ranking area
+	chartFooterH    = 52
 	chartCornerSize = 6
+	chartLabelWidth = 240
+	chartValueWidth = 360
 )
 
 var (
-	colorBackground = color.RGBA{0x12, 0x16, 0x21, 0xff}
-	colorPanel      = color.RGBA{0x1b, 0x21, 0x30, 0xff}
-	colorTextBright = color.RGBA{0xf2, 0xf5, 0xfa, 0xff}
-	colorTextMuted  = color.RGBA{0x93, 0x9f, 0xb4, 0xff}
-	colorAccent     = color.RGBA{0x4d, 0xa3, 0xff, 0xff}
-	colorAccentWarm = color.RGBA{0xff, 0xa5, 0x4d, 0xff}
-	colorDanger     = color.RGBA{0xff, 0x6b, 0x6b, 0xff}
-	colorBarTrack   = color.RGBA{0x27, 0x2f, 0x42, 0xff}
+	colorBackground  = color.RGBA{0x0f, 0x14, 0x20, 0xff}
+	colorPanel       = color.RGBA{0x1a, 0x21, 0x30, 0xff}
+	colorTextBright  = color.RGBA{0xe6, 0xea, 0xf2, 0xff}
+	colorTextMuted   = color.RGBA{0x8a, 0x94, 0xa6, 0xff}
+	colorAccent      = color.RGBA{0x4c, 0x9a, 0xff, 0xff}
+	colorAccentWarm  = color.RGBA{0xff, 0xb0, 0x20, 0xff}
+	colorAccentGreen = color.RGBA{0x00, 0xd6, 0x8f, 0xff}
+	colorDanger      = color.RGBA{0xff, 0x6b, 0x6b, 0xff}
+	colorGrid        = color.RGBA{0x2a, 0x33, 0x46, 0xff}
+	colorEmptyGroup  = color.RGBA{0x5a, 0x64, 0x78, 0xff}
 
-	// Bar palette cycles per row so adjacent bars stay distinguishable.
-	barPalette = []color.RGBA{
-		{0x4d, 0xa3, 0xff, 0xff},
-		{0x4d, 0xd8, 0xb0, 0xff},
-		{0xff, 0xa5, 0x4d, 0xff},
-		{0xb4, 0x8b, 0xff, 0xff},
-		{0xff, 0x8f, 0xb3, 0xff},
-		{0x6f, 0xd5, 0xff, 0xff},
-		{0xd8, 0xd0, 0x5a, 0xff},
-		{0x8d, 0xe0, 0x6b, 0xff},
+	// Group palette: each non-empty remark takes the next colour; the empty
+	// remark always renders in grey (colorEmptyGroup).
+	groupPalette = []color.RGBA{
+		{0x4c, 0x9a, 0xff, 0xff},
+		{0x00, 0xd6, 0x8f, 0xff},
+		{0xff, 0xb0, 0x20, 0xff},
+		{0xff, 0x6b, 0x81, 0xff},
+		{0xa6, 0x6c, 0xff, 0xff},
+		{0x3e, 0xd6, 0xc5, 0xff},
+		{0xf7, 0x78, 0x25, 0xff},
+		{0xe2, 0xe8, 0xf0, 0xff},
+		{0x94, 0xa3, 0xb8, 0xff},
+		{0xfa, 0xcc, 0x15, 0xff},
 	}
 )
 
@@ -59,9 +67,11 @@ var (
 // renderer holds its own drawer and callers must not share faces across goroutines.
 type chartFonts struct {
 	title  font.Face
+	sub    font.Face
 	label  font.Face
 	value  font.Face
 	metric font.Face
+	header font.Face
 }
 
 // newChartFonts builds the face set. The embedded Go fonts carry no CJK
@@ -80,7 +90,7 @@ func newChartFonts(fontPath string) (*chartFonts, error) {
 	if fontPath != "" {
 		if raw, readErr := os.ReadFile(fontPath); readErr != nil {
 			common.SysError("tgbot: read chart font failed, using built-in font: " + readErr.Error())
-		} else if custom, parseErr := opentype.Parse(raw); parseErr != nil {
+		} else if custom, parseErr := parseFontFile(raw); parseErr != nil {
 			common.SysError("tgbot: parse chart font failed, using built-in font: " + parseErr.Error())
 		} else {
 			bold, regular = custom, custom
@@ -89,41 +99,87 @@ func newChartFonts(fontPath string) (*chartFonts, error) {
 	newFace := func(f *opentype.Font, size float64) (font.Face, error) {
 		return opentype.NewFace(f, &opentype.FaceOptions{Size: size, DPI: 72, Hinting: font.HintingFull})
 	}
-	title, err := newFace(bold, 22)
+	title, err := newFace(bold, 26)
 	if err != nil {
 		return nil, err
 	}
-	label, err := newFace(regular, 13)
+	sub, err := newFace(regular, 13)
 	if err != nil {
 		return nil, err
 	}
-	value, err := newFace(bold, 13)
+	label, err := newFace(regular, 14)
 	if err != nil {
 		return nil, err
 	}
-	metric, err := newFace(bold, 34)
+	value, err := newFace(bold, 14)
 	if err != nil {
 		return nil, err
 	}
-	return &chartFonts{title: title, label: label, value: value, metric: metric}, nil
+	metric, err := newFace(bold, 32)
+	if err != nil {
+		return nil, err
+	}
+	header, err := newFace(bold, 15)
+	if err != nil {
+		return nil, err
+	}
+	return &chartFonts{title: title, sub: sub, label: label, value: value, metric: metric, header: header}, nil
+}
+
+// parseFontFile parses a font from raw bytes, supporting both single-font
+// files (TTF/OTF) and TrueType/OpenType collections (TTC — e.g. the system
+// NotoSansCJK-Regular.ttc). opentype.Parse rejects collections, so a ttc must
+// go through sfnt.ParseCollection and take the first face. opentype.Font is an
+// alias for sfnt.Font, so the returned pointer is usable directly.
+func parseFontFile(raw []byte) (*opentype.Font, error) {
+	if f, err := opentype.Parse(raw); err == nil {
+		return f, nil
+	}
+	coll, err := sfnt.ParseCollection(raw)
+	if err != nil {
+		return nil, err
+	}
+	if coll.NumFonts() == 0 {
+		return nil, fmt.Errorf("tgbot: empty font collection")
+	}
+	return coll.Font(0)
 }
 
 func (f *chartFonts) close() {
-	for _, face := range []font.Face{f.title, f.label, f.value, f.metric} {
+	for _, face := range []font.Face{f.title, f.sub, f.label, f.value, f.metric, f.header} {
 		if face != nil {
 			_ = face.Close()
 		}
 	}
 }
 
-// RenderDashboard draws the monitoring dashboard as a PNG.
+// rankEntry is one row of the ranking area: either a group header or a user.
+type rankEntry struct {
+	isHeader bool
+	text     string     // header text
+	user     UserStat   // user row
+	color    color.RGBA // bar / swatch colour for the group
+}
+
+// RenderDashboard draws the monitoring dashboard as a PNG. The layout mirrors
+// the Python dashboard: four KPI cards, a per-remark grouped ranking with a
+// header line and one bar per user (today's spend), a colour legend, and a
+// footer with per-group and grand totals.
 func RenderDashboard(stats *Stats, settings *MonitorSettings, title string) ([]byte, error) {
 	if stats == nil {
 		return nil, fmt.Errorf("tgbot: nil stats")
 	}
 	fontPath := ""
+	symbol := "$"
+	quotaPerUnit := 500000.0
 	if settings != nil {
 		fontPath = settings.ChartFontPath
+		if settings.CurrencySymbol != "" {
+			symbol = settings.CurrencySymbol
+		}
+		if settings.QuotaPerUnit > 0 {
+			quotaPerUnit = float64(settings.QuotaPerUnit)
+		}
 	}
 	fonts, err := newChartFonts(fontPath)
 	if err != nil {
@@ -131,67 +187,153 @@ func RenderDashboard(stats *Stats, settings *MonitorSettings, title string) ([]b
 	}
 	defer fonts.close()
 
-	canvas := image.NewRGBA(image.Rect(0, 0, chartWidth, chartHeight))
+	// Assign a colour per group and flatten into ranking entries.
+	entries := make([]rankEntry, 0)
+	colorIdx := 0
+	maxToday := 1.0
+	for _, g := range stats.Groups {
+		var col color.RGBA
+		if g.Remark == "" {
+			col = colorEmptyGroup
+		} else {
+			col = groupPalette[colorIdx%len(groupPalette)]
+			colorIdx++
+		}
+		remarkLabel := g.Remark
+		if remarkLabel == "" {
+			remarkLabel = "无备注"
+		}
+		entries = append(entries, rankEntry{
+			isHeader: true,
+			color:    col,
+			text: fmt.Sprintf("备注[%s] · %d位 · 今日 %s · 累计 %s · RPM %d · TPM %d",
+				remarkLabel, len(g.Users), money(g.Today, quotaPerUnit, symbol),
+				money(g.AllTime, quotaPerUnit, symbol), g.RPM, g.TPM),
+		})
+		for _, u := range g.Users {
+			entries = append(entries, rankEntry{user: u, color: col})
+			if v := float64(u.Today) / quotaPerUnit; v > maxToday {
+				maxToday = v
+			}
+		}
+	}
+
+	// Compute canvas height from the number of ranking rows.
+	rankRows := max(len(entries), 1)
+	rankAreaTop := chartPadding + chartCardTop + chartCardHeight + chartRankTop
+	legendH := 30
+	height := rankAreaTop + rankRows*chartRowHeight + legendH + chartFooterH + chartPadding
+	height = max(height, 460)
+
+	canvas := image.NewRGBA(image.Rect(0, 0, chartWidth, height))
 	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{colorBackground}, image.Point{}, draw.Src)
 
-	symbol := "$"
-	quotaPerUnit := 500000.0
-	maskUsername := false
-	if settings != nil {
-		if settings.CurrencySymbol != "" {
-			symbol = settings.CurrencySymbol
-		}
-		if settings.QuotaPerUnit > 0 {
-			quotaPerUnit = float64(settings.QuotaPerUnit)
-		}
-		maskUsername = settings.MaskUsername
+	// Title + subtitle.
+	if title == "" {
+		title = "New-API 实时监控"
+	}
+	drawText(canvas, fonts.title, colorTextBright, chartPadding, chartPadding+28, title)
+
+	// KPI cards.
+	cardsTop := chartPadding + chartCardTop
+	cardW := (chartWidth - 2*chartPadding - 3*chartCardGap) / 4
+	kpis := []struct {
+		label string
+		value string
+		sub   string
+		col   color.RGBA
+	}{
+		{"当前 RPM", formatCount(stats.RPM), "请求/分钟", colorAccentGreen},
+		{"当前 TPM", formatCount(stats.TPM), "Token/分钟", colorAccent},
+		{"今日消费", money(stats.TodayTotal, quotaPerUnit, symbol), "Today", colorTextBright},
+		{"备注分组", fmt.Sprintf("%d", len(stats.Groups)), "个", colorAccentWarm},
+	}
+	for i, k := range kpis {
+		x := chartPadding + i*(cardW+chartCardGap)
+		drawMetricCard(canvas, fonts, x, cardsTop, cardW, chartCardHeight, k.label, k.value, k.sub, k.col)
 	}
 
-	drawText(canvas, fonts.title, colorTextBright, chartPadding, chartPadding+22, title)
+	// Ranking area.
+	if len(entries) == 0 {
+		drawText(canvas, fonts.label, colorTextMuted, chartPadding, rankAreaTop+30, "暂无消费记录")
+	} else {
+		trackX := chartPadding + chartLabelWidth
+		trackW := chartWidth - chartPadding - trackX - chartValueWidth
+		if trackW < 60 {
+			trackW = 60
+		}
+		rowY := rankAreaTop
+		for _, e := range entries {
+			if e.isHeader {
+				drawText(canvas, fonts.header, colorTextBright, chartPadding, rowY+chartRowHeight/2+5,
+					truncateLabel(e.text, 70))
+				rowY += chartRowHeight
+				continue
+			}
+			u := e.user
+			barTop := rowY + 8
+			barBot := rowY + chartRowHeight - 12
+			// Name label.
+			drawText(canvas, fonts.label, colorTextMuted, chartPadding+16, rowY+chartRowHeight/2+5,
+				truncateLabel(u.Name, 18))
+			// Bar track + fill.
+			draw.Draw(canvas, image.Rect(trackX, barTop, trackX+trackW, barBot),
+				&image.Uniform{colorGrid}, image.Point{}, draw.Src)
+			today := float64(u.Today) / quotaPerUnit
+			filled := int(float64(trackW) * today / maxToday)
+			if filled < 2 && u.Today > 0 {
+				filled = 2
+			}
+			if filled > 0 {
+				draw.Draw(canvas, image.Rect(trackX, barTop, trackX+filled, barBot),
+					&image.Uniform{e.color}, image.Point{}, draw.Src)
+			}
+			// Value column: today / all-time + RPM/TPM.
+			val := fmt.Sprintf("今 %s / 累计 %s   RPM %d  TPM %s",
+				money(u.Today, quotaPerUnit, symbol), money(u.AllTime, quotaPerUnit, symbol),
+				u.RPM, kfmt(u.TPM))
+			drawText(canvas, fonts.label, colorTextBright, trackX+trackW+14, rowY+chartRowHeight/2+5, val)
+			rowY += chartRowHeight
+		}
 
-	metricsTop := chartPadding + 40
-	metricW := (chartWidth - 2*chartPadding - 2*chartPanelGap) / 3
-	drawMetricCard(canvas, fonts, chartPadding, metricsTop, metricW, chartHeaderH, "RPM", formatCount(stats.RPM), colorAccent)
-	drawMetricCard(canvas, fonts, chartPadding+metricW+chartPanelGap, metricsTop, metricW, chartHeaderH, "TPM", formatCount(stats.TPM), colorAccentWarm)
-	errColor := colorAccent
-	if stats.ErrorCount > 0 {
-		errColor = colorDanger
+		// Legend: one swatch per group.
+		legendY := rowY + 6
+		lx := chartPadding
+		for _, g := range stats.Groups {
+			var col color.RGBA
+			if g.Remark == "" {
+				col = colorEmptyGroup
+			} else {
+				// Recompute the same colour order used above.
+				col = legendColor(stats.Groups, g.Remark)
+			}
+			label := g.Remark
+			if label == "" {
+				label = "无备注"
+			}
+			draw.Draw(canvas, image.Rect(lx, legendY, lx+16, legendY+16),
+				&image.Uniform{col}, image.Point{}, draw.Src)
+			drawText(canvas, fonts.sub, colorTextMuted, lx+22, legendY+13, label)
+			lx += 22 + textWidth(fonts.sub, label) + 26
+		}
 	}
-	drawMetricCard(canvas, fonts, chartPadding+2*(metricW+chartPanelGap), metricsTop, metricW, chartHeaderH,
-		"ERRORS / MIN", formatCount(stats.ErrorCount), errColor)
 
-	panelsTop := metricsTop + chartHeaderH + chartPanelGap
-	panelH := chartHeight - panelsTop - chartPadding
-	panelW := (chartWidth - 2*chartPadding - chartPanelGap) / 2
-
-	todayBars := make([]barDatum, 0, chartMaxBars)
-	for _, row := range stats.TodaySpend {
-		if len(todayBars) == chartMaxBars {
-			break
-		}
-		name := row.Username
-		if maskUsername {
-			name = MaskName(name)
-		}
-		todayBars = append(todayBars, barDatum{
-			label: name,
-			value: float64(row.Quota) / quotaPerUnit,
-		})
-	}
-	drawBarPanel(canvas, fonts, chartPadding, panelsTop, panelW, panelH, "TODAY SPEND / TOP USERS", todayBars, symbol)
-
-	remarkBars := make([]barDatum, 0, chartMaxBars)
-	for _, row := range stats.AllTimeSpend {
-		if len(remarkBars) == chartMaxBars {
-			break
-		}
-		label := row.Remark
+	// Footer: per-group totals + grand total.
+	var footParts []string
+	for _, g := range stats.Groups {
+		label := g.Remark
 		if label == "" {
-			label = "(no remark)"
+			label = "无备注"
 		}
-		remarkBars = append(remarkBars, barDatum{label: label, value: float64(row.Quota) / quotaPerUnit})
+		footParts = append(footParts, fmt.Sprintf("[%s] 今%s/累计%s",
+			label, money(g.Today, quotaPerUnit, symbol), money(g.AllTime, quotaPerUnit, symbol)))
 	}
-	drawBarPanel(canvas, fonts, chartPadding+panelW+chartPanelGap, panelsTop, panelW, panelH, "ALL-TIME SPEND / GROUP", remarkBars, symbol)
+	footer := strings.Join(footParts, "   ")
+	if footer != "" {
+		footer += "   |   "
+	}
+	footer += fmt.Sprintf("今日合计 %s", money(stats.TodayTotal, quotaPerUnit, symbol))
+	drawText(canvas, fonts.sub, colorTextMuted, chartPadding, height-chartPadding, truncateLabel(footer, 120))
 
 	var out bytes.Buffer
 	if err := png.Encode(&out, canvas); err != nil {
@@ -200,63 +342,28 @@ func RenderDashboard(stats *Stats, settings *MonitorSettings, title string) ([]b
 	return out.Bytes(), nil
 }
 
-type barDatum struct {
-	label string
-	value float64
+// legendColor recomputes the palette colour assigned to a remark, matching the
+// order used when the entries were built (non-empty remarks consume palette
+// slots in group order; the empty remark is always grey).
+func legendColor(groups []GroupStat, remark string) color.RGBA {
+	idx := 0
+	for _, g := range groups {
+		if g.Remark == "" {
+			continue
+		}
+		if g.Remark == remark {
+			return groupPalette[idx%len(groupPalette)]
+		}
+		idx++
+	}
+	return colorEmptyGroup
 }
 
-func drawMetricCard(dst *image.RGBA, fonts *chartFonts, x, y, w, h int, label, value string, accent color.RGBA) {
+func drawMetricCard(dst *image.RGBA, fonts *chartFonts, x, y, w, h int, label, value, sub string, accent color.RGBA) {
 	fillPanel(dst, x, y, w, h)
-	// Accent stripe on the left edge marks the metric category.
-	draw.Draw(dst, image.Rect(x, y+chartCornerSize, x+4, y+h-chartCornerSize), &image.Uniform{accent}, image.Point{}, draw.Src)
-	drawText(dst, fonts.label, colorTextMuted, x+20, y+26, label)
-	drawText(dst, fonts.metric, colorTextBright, x+20, y+h-22, value)
-}
-
-func drawBarPanel(dst *image.RGBA, fonts *chartFonts, x, y, w, h int, title string, bars []barDatum, symbol string) {
-	fillPanel(dst, x, y, w, h)
-	drawText(dst, fonts.value, colorTextMuted, x+20, y+26, title)
-
-	if len(bars) == 0 {
-		drawText(dst, fonts.label, colorTextMuted, x+20, y+56, "no data")
-		return
-	}
-
-	maxValue := 0.0
-	for _, bar := range bars {
-		maxValue = math.Max(maxValue, bar.value)
-	}
-	if maxValue <= 0 {
-		maxValue = 1
-	}
-
-	labelW := 150
-	trackX := x + 20 + labelW
-	trackW := w - 40 - labelW - 90
-	if trackW < 40 {
-		trackW = 40
-	}
-
-	rowY := y + 46
-	for i, bar := range bars {
-		if rowY+chartBarHeight > y+h-8 {
-			break
-		}
-		drawText(dst, fonts.label, colorTextMuted, x+20, rowY+chartBarHeight-8, truncateLabel(bar.label, 16))
-		draw.Draw(dst, image.Rect(trackX, rowY+4, trackX+trackW, rowY+chartBarHeight-4),
-			&image.Uniform{colorBarTrack}, image.Point{}, draw.Src)
-		filled := int(float64(trackW) * bar.value / maxValue)
-		if filled < 2 && bar.value > 0 {
-			filled = 2
-		}
-		if filled > 0 {
-			draw.Draw(dst, image.Rect(trackX, rowY+4, trackX+filled, rowY+chartBarHeight-4),
-				&image.Uniform{barPalette[i%len(barPalette)]}, image.Point{}, draw.Src)
-		}
-		drawText(dst, fonts.value, colorTextBright, trackX+trackW+12, rowY+chartBarHeight-8,
-			fmt.Sprintf("%s%.2f", symbol, bar.value))
-		rowY += chartBarHeight + chartBarGap
-	}
+	drawText(dst, fonts.sub, colorTextMuted, x+18, y+26, label)
+	drawText(dst, fonts.metric, accent, x+18, y+h-34, value)
+	drawText(dst, fonts.sub, colorTextMuted, x+18, y+h-12, sub)
 }
 
 // fillPanel paints a card background with the corner pixels trimmed so the
@@ -283,6 +390,11 @@ func drawText(dst *image.RGBA, face font.Face, col color.RGBA, x, y int, text st
 		Dot:  fixed.P(x, y),
 	}
 	drawer.DrawString(substituteMissingGlyphs(face, text))
+}
+
+func textWidth(face font.Face, text string) int {
+	d := &font.Drawer{Face: face}
+	return d.MeasureString(substituteMissingGlyphs(face, text)).Ceil()
 }
 
 // substituteMissingGlyphs replaces runes the face cannot render with '?'.
@@ -316,6 +428,26 @@ func truncateLabel(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes-1]) + "…"
+}
+
+// money formats a raw quota value into a currency string.
+func money(quota int, quotaPerUnit float64, symbol string) string {
+	if quotaPerUnit <= 0 {
+		quotaPerUnit = 500000
+	}
+	return fmt.Sprintf("%s%.2f", symbol, float64(quota)/quotaPerUnit)
+}
+
+// kfmt abbreviates large numbers: 1.2M / 34k / 567.
+func kfmt(v int) string {
+	switch {
+	case v >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(v)/1_000_000)
+	case v >= 1_000:
+		return fmt.Sprintf("%.0fk", float64(v)/1_000)
+	default:
+		return fmt.Sprintf("%d", v)
+	}
 }
 
 func formatCount(n int) string {
