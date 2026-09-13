@@ -694,3 +694,159 @@ func rejectLargeBody(rules []Rule, size int) (string, error) {
 	}
 	return "", nil
 }
+
+// schemaPropertyKeyPattern 是上游对 input_schema 属性键的约束：
+// ^[a-zA-Z0-9_.-]{1,64}$。客户端（MCP 工具）会用中文或特殊字符当键名，直接 400。
+var schemaPropertyKeyIllegal = regexp.MustCompile(`[^a-zA-Z0-9_.-]`)
+
+// fixSchemaPropertyKeys 递归清洗所有 input_schema 里的 properties 键名。
+// 非法字符替换成下划线，超长截断到 64，撞名时补下划线直到唯一。
+func fixSchemaPropertyKeys(data map[string]any) bool {
+	tools, ok := getTools(data)
+	if !ok {
+		return false
+	}
+	changed := false
+	for _, item := range tools {
+		tool, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		schema, ok := tool["input_schema"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if sanitizeSchemaProperties(schema) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// sanitizeSchemaProperties 遍历 schema 树，凡是带 properties 的对象都清洗一遍。
+// properties 的值本身可能嵌套 properties（对象）或 items（数组），所以递归。
+func sanitizeSchemaProperties(node map[string]any) bool {
+	changed := false
+	if props, ok := node["properties"].(map[string]any); ok {
+		for key, val := range props {
+			clean := sanitizePropertyKey(key)
+			if clean != key {
+				// 撞名时补下划线，保证不覆盖已有键。
+				for _, exists := props[clean]; exists; _, exists = props[clean] {
+					clean = truncateRunes(clean+"_", 64)
+				}
+				delete(props, key)
+				props[clean] = val
+				changed = true
+			}
+			if child, ok := val.(map[string]any); ok {
+				if sanitizeSchemaProperties(child) {
+					changed = true
+				}
+			}
+		}
+	}
+	if items, ok := node["items"].(map[string]any); ok {
+		if sanitizeSchemaProperties(items) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+func sanitizePropertyKey(key string) string {
+	clean := schemaPropertyKeyIllegal.ReplaceAllString(key, "_")
+	clean = truncateRunes(clean, 64)
+	if clean == "" {
+		return "_"
+	}
+	return clean
+}
+
+func truncateRunes(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen])
+}
+
+// fixThinkingDisabled 删掉显式的 thinking.type=disabled。
+// 部分模型只接受 adaptive，显式 disabled 会直接 400；
+// 不传 thinking 字段与 disabled 同义，删掉最安全。
+func fixThinkingDisabled(data map[string]any) bool {
+	thinking, ok := data["thinking"].(map[string]any)
+	if !ok {
+		return false
+	}
+	if thinking["type"] != "disabled" {
+		return false
+	}
+	delete(data, "thinking")
+	return true
+}
+
+// stripCacheControlScope 剥掉 cache_control 里的 scope 字段。
+// 上游只认 ephemeral 等少数字段，客户端带的 scope 会报 Extra inputs。
+func stripCacheControlScope(data map[string]any) bool {
+	changed := false
+	strip := func(blocks []any) {
+		for _, block := range blocks {
+			b, ok := block.(map[string]any)
+			if !ok {
+				continue
+			}
+			cc, ok := b["cache_control"].(map[string]any)
+			if !ok {
+				continue
+			}
+			if _, exists := cc["scope"]; exists {
+				delete(cc, "scope")
+				changed = true
+			}
+		}
+	}
+	if msgs, ok := getMessages(data); ok {
+		for _, m := range msgs {
+			if msg, ok := m.(map[string]any); ok {
+				if content, ok := msg["content"].([]any); ok {
+					strip(content)
+				}
+			}
+		}
+	}
+	// system 既可能是字符串也可能是块数组，都要覆盖。
+	if sys, ok := data["system"].([]any); ok {
+		strip(sys)
+	}
+	return changed
+}
+
+// fixEmptyContent 把 content 为空的消息补成占位文本块。
+// 上游对空数组和空字符串都报 "must have non-empty content"，
+// 探活类客户端会发这种消息，与其让它 400 不如补个占位。
+func fixEmptyContent(data map[string]any) bool {
+	msgs, ok := getMessages(data)
+	if !ok {
+		return false
+	}
+	changed := false
+	for _, m := range msgs {
+		msg, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		empty := false
+		switch c := msg["content"].(type) {
+		case string:
+			empty = strings.TrimSpace(c) == ""
+		case []any:
+			empty = len(c) == 0
+		}
+		if empty {
+			msg["content"] = []any{map[string]any{"type": "text", "text": "(empty)"}}
+			changed = true
+		}
+	}
+	return changed
+}

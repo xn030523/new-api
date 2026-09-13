@@ -2,7 +2,7 @@
   {
     "type": "reject_large_body",
     "config": {
-      "max_bytes": 31457280
+      "max_bytes": 30000000
     }
   },
   {
@@ -39,6 +39,9 @@
     "type": "strip_url_source"
   },
   {
+    "type": "strip_cache_control_scope"
+  },
+  {
     "type": "trim_whitespace"
   },
   {
@@ -46,6 +49,9 @@
   },
   {
     "type": "fix_thinking_type"
+  },
+  {
+    "type": "fix_thinking_disabled"
   },
   {
     "type": "fix_thinking_budget"
@@ -62,7 +68,10 @@
       "models": [
         "claude-opus-4-8",
         "claude-opus-5",
-        "claude-opus-4-7"
+        "claude-opus-4-7",
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-sonnet-5"
       ],
       "params": [
         "temperature",
@@ -170,6 +179,9 @@
     "type": "fix_schema_oneof"
   },
   {
+    "type": "fix_schema_property_keys"
+  },
+  {
     "type": "fix_additional_props"
   },
   {
@@ -180,6 +192,9 @@
   },
   {
     "type": "reject_long_prompt"
+  },
+  {
+    "type": "fix_empty_content"
   },
   {
     "type": "reject_empty_messages"

@@ -569,3 +569,129 @@ func TestStripEmptyTextLeavesUnaffectedMessagesAlone(t *testing.T) {
 	require.Len(t, second, 1)
 	assert.Equal(t, "keep", second[0].(map[string]any)["text"])
 }
+
+func TestFixSchemaPropertyKeysSanitizesIllegalKeys(t *testing.T) {
+	// 生产实测：MCP 工具用中文当属性键，上游要求 ^[a-zA-Z0-9_.-]{1,64}$。
+	data := map[string]any{"tools": []any{
+		map[string]any{"name": "m", "input_schema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"用户名":       map[string]any{"type": "string"},
+				"ok_key":    map[string]any{"type": "string"},
+				"has space": map[string]any{"type": "string"},
+			},
+		}},
+	}}
+	require.True(t, fixSchemaPropertyKeys(data))
+	props := data["tools"].([]any)[0].(map[string]any)["input_schema"].(map[string]any)["properties"].(map[string]any)
+	assert.Contains(t, props, "ok_key")
+	assert.Contains(t, props, "has_space")
+	assert.Contains(t, props, "___")
+	assert.NotContains(t, props, "用户名")
+}
+
+func TestFixSchemaPropertyKeysHandlesCollisionsAndNesting(t *testing.T) {
+	data := map[string]any{"tools": []any{
+		map[string]any{"input_schema": map[string]any{
+			"properties": map[string]any{
+				"a_b": map[string]any{"type": "string"},
+				"a b": map[string]any{"type": "integer"}, // 清洗后撞 a_b
+				"obj": map[string]any{"properties": map[string]any{
+					"嵌套键": map[string]any{"type": "string"},
+				}},
+			},
+		}},
+	}}
+	require.True(t, fixSchemaPropertyKeys(data))
+	props := data["tools"].([]any)[0].(map[string]any)["input_schema"].(map[string]any)["properties"].(map[string]any)
+	assert.Contains(t, props, "a_b")
+	assert.Contains(t, props, "a_b_")
+	nested := props["obj"].(map[string]any)["properties"].(map[string]any)
+	assert.Contains(t, nested, "___")
+}
+
+func TestFixSchemaPropertyKeysTruncatesLongKeys(t *testing.T) {
+	long := strings.Repeat("k", 100)
+	data := map[string]any{"tools": []any{
+		map[string]any{"input_schema": map[string]any{
+			"properties": map[string]any{long: map[string]any{"type": "string"}},
+		}},
+	}}
+	require.True(t, fixSchemaPropertyKeys(data))
+	props := data["tools"].([]any)[0].(map[string]any)["input_schema"].(map[string]any)["properties"].(map[string]any)
+	for k := range props {
+		assert.LessOrEqual(t, len(k), 64)
+	}
+}
+
+func TestFixThinkingDisabled(t *testing.T) {
+	data := map[string]any{"thinking": map[string]any{"type": "disabled"}}
+	require.True(t, fixThinkingDisabled(data))
+	assert.NotContains(t, data, "thinking")
+
+	// adaptive / enabled 不能动，那是合法配置。
+	keep := map[string]any{"thinking": map[string]any{"type": "adaptive"}}
+	assert.False(t, fixThinkingDisabled(keep))
+	assert.Contains(t, keep, "thinking")
+}
+
+func TestStripCacheControlScope(t *testing.T) {
+	data := map[string]any{
+		"system": []any{
+			map[string]any{"type": "text", "text": "sys",
+				"cache_control": map[string]any{"type": "ephemeral", "scope": "global"}},
+		},
+		"messages": []any{
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "text", "text": "hi",
+					"cache_control": map[string]any{"type": "ephemeral", "scope": "global"}},
+			}},
+		},
+	}
+	require.True(t, stripCacheControlScope(data))
+	sysCC := data["system"].([]any)[0].(map[string]any)["cache_control"].(map[string]any)
+	assert.NotContains(t, sysCC, "scope")
+	assert.Equal(t, "ephemeral", sysCC["type"], "type 字段必须保留")
+	msgCC := data["messages"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)["cache_control"].(map[string]any)
+	assert.NotContains(t, msgCC, "scope")
+}
+
+func TestStripEmptyTextDropsWhitespaceOnly(t *testing.T) {
+	data := map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "text", "text": "   \n\t  "},
+			map[string]any{"type": "text", "text": "real"},
+		}},
+	}}
+	require.True(t, stripEmptyText(data))
+	content := data["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	require.Len(t, content, 1)
+	assert.Equal(t, "real", content[0].(map[string]any)["text"])
+}
+
+func TestFixEffortDeletesInvalidValues(t *testing.T) {
+	data := map[string]any{"output_config": map[string]any{"effort": "auto"}}
+	require.True(t, fixEffort(data))
+	assert.NotContains(t, data["output_config"], "effort")
+
+	// 合法值不能动。
+	keep := map[string]any{"output_config": map[string]any{"effort": "medium"}}
+	assert.False(t, fixEffort(keep))
+	assert.Equal(t, "medium", keep["output_config"].(map[string]any)["effort"])
+}
+
+func TestFixEmptyContent(t *testing.T) {
+	data := map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": []any{}},
+		map[string]any{"role": "assistant", "content": ""},
+		map[string]any{"role": "user", "content": "hello"},
+	}}
+	require.True(t, fixEmptyContent(data))
+	msgs := data["messages"].([]any)
+	for i, m := range msgs[:2] {
+		content := m.(map[string]any)["content"].([]any)
+		require.Len(t, content, 1, "消息 %d 必须非空", i)
+	}
+	assert.Equal(t, "hello", msgs[2].(map[string]any)["content"],
+		"非空的字符串 content 不能被改写")
+}

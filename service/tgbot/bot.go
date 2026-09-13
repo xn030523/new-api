@@ -315,6 +315,16 @@ func (s *BotService) handleCallback(query *tgclient.CallbackQuery) {
 	state.Step++
 	s.conversations.Store(query.From.ID, state)
 	_ = s.client.AnswerCallbackQuery(query.ID, "")
+	// adduser 的最后一步是点备注按钮，从回调而不是文本消息进入。
+	// promptCurrentStep 只负责发下一步的提问，不会收尾，必须在这里直接完成创建，
+	// 否则会话停在 step 4 永远等不到处理（按钮上一直转圈）。
+	if state.Command == "adduser" && prefix == "adduser_remark" {
+		s.finishAdduser(query.Message, state)
+		// finishAdduser 按消息来源删会话，但回调消息的来源是 Bot 自己，
+		// 用户的会话要按 query.From 删。
+		s.conversations.Delete(query.From.ID)
+		return
+	}
 	s.promptCurrentStep(query.Message, state)
 }
 
@@ -452,7 +462,12 @@ func (s *BotService) startGetkey(msg *tgclient.Message) {
 }
 
 func (s *BotService) finishGetkey(msg *tgclient.Message, state *ConversationState) {
-	defer s.conversations.Delete(msg.From.ID)
+	// 回调消息里 From 是 Bot 自己，文本消息里才是用户；两种情况都可能走到这里。
+	defer func() {
+		if msg.From != nil {
+			s.conversations.Delete(msg.From.ID)
+		}
+	}()
 	feature := s.getFeature(FeatureGetkey)
 	settings := GetGetkeySettings(feature)
 	group, _ := state.Data["getkey_group"].(string)
@@ -567,7 +582,12 @@ func (s *BotService) remarkKeyboard(callbackPrefix string) *tgclient.InlineKeybo
 }
 
 func (s *BotService) finishAdduser(msg *tgclient.Message, state *ConversationState) {
-	defer s.conversations.Delete(msg.From.ID)
+	// 回调消息里 From 是 Bot 自己，文本消息里才是用户；两种情况都可能走到这里。
+	defer func() {
+		if msg.From != nil {
+			s.conversations.Delete(msg.From.ID)
+		}
+	}()
 	feature := s.getFeature(FeatureAdduser)
 	settings := GetAdduserSettings(feature)
 	group, _ := state.Data["adduser_group"].(string)
@@ -629,7 +649,12 @@ func (s *BotService) startBilling(msg *tgclient.Message) {
 }
 
 func (s *BotService) finishBilling(msg *tgclient.Message, state *ConversationState) {
-	defer s.conversations.Delete(msg.From.ID)
+	// 回调消息里 From 是 Bot 自己，文本消息里才是用户；两种情况都可能走到这里。
+	defer func() {
+		if msg.From != nil {
+			s.conversations.Delete(msg.From.ID)
+		}
+	}()
 	feature := s.getFeature(FeatureBilling)
 	if feature == nil {
 		return

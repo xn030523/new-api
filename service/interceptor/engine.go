@@ -265,6 +265,14 @@ func applyRule(data map[string]any, rule Rule, modelName string) (bool, error) {
 		return fixToolName(data), nil
 	case RuleFixTempTopPConflict:
 		return fixTempTopPConflict(data), nil
+	case RuleFixSchemaPropertyKeys:
+		return fixSchemaPropertyKeys(data), nil
+	case RuleFixThinkingDisabled:
+		return fixThinkingDisabled(data), nil
+	case RuleStripCacheScope:
+		return stripCacheControlScope(data), nil
+	case RuleFixEmptyContent:
+		return fixEmptyContent(data), nil
 	case RuleRejectEmptyMessages:
 		return false, rejectEmptyMessages(data)
 	case RuleFixThinkingBudget:
@@ -654,8 +662,9 @@ func stripEmptyText(data map[string]any) bool {
 			b, ok := block.(map[string]any)
 			if ok {
 				t, _ := b["type"].(string)
-				text, _ := b["text"].(string)
-				if t == "text" && text == "" {
+				text, hasText := b["text"].(string)
+				// 空串和纯空白上游都不接受（"must contain non-whitespace text"）。
+				if t == "text" && hasText && strings.TrimSpace(text) == "" {
 					stripped = true
 					continue
 				}
@@ -754,6 +763,8 @@ func stripTopPKIfThinking(data map[string]any) bool {
 }
 
 // fixEffort: 非 thinking 时 effort max → high
+var allowedEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
 func fixEffort(data map[string]any) bool {
 	if isThinkingEnabled(data) {
 		return false
@@ -764,9 +775,18 @@ func fixEffort(data map[string]any) bool {
 			oc["effort"] = "high"
 			return true
 		}
+		// 不在允许清单里的值（比如 auto、空串）会被 400，删掉让上游用默认值。
+		if effort, _ := oc["effort"].(string); effort != "" && !slices.Contains(allowedEfforts, effort) {
+			delete(oc, "effort")
+			return true
+		}
 	}
 	if effort, _ := data["effort"].(string); effort == "max" || effort == "xhigh" {
 		data["effort"] = "high"
+		return true
+	}
+	if effort, _ := data["effort"].(string); effort != "" && !slices.Contains(allowedEfforts, effort) {
+		delete(data, "effort")
 		return true
 	}
 	return false

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,14 @@ func NewClient(token string) *Client {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// NewClientWithBaseURL points the client at a custom API base URL so tests
+// can run against a local Telegram API stub instead of api.telegram.org.
+func NewClientWithBaseURL(token, baseURL string) *Client {
+	c := NewClient(token)
+	c.baseURL = strings.TrimSuffix(baseURL, "/")
+	return c
 }
 
 // Update represents an incoming update from the getUpdates endpoint.
